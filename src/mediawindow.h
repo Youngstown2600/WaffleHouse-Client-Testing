@@ -45,6 +45,7 @@ public slots:
     void savePlaylistDialog();
     void startWaffleCast();
     void stopWaffleCast();
+    void connectWaffleCastDialog();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -88,6 +89,8 @@ private:
     QPushButton *m_castStart = nullptr;
     QPushButton *m_castStop = nullptr;
     QPushButton *m_castCopyInvite = nullptr;
+    QPushButton *m_castCopyPublic = nullptr;
+    QPushButton *m_castConnect = nullptr;
     QListWidget *m_playlist = nullptr;
     QSlider *m_seek = nullptr;
     QSlider *m_volume = nullptr;

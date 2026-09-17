@@ -398,14 +398,18 @@ void MediaWindow::buildUi()
     m_castStatus = new QLabel(QStringLiteral("Broadcast off"), castBox);
     m_castStart = new QPushButton(QStringLiteral("Start Broadcast"), castBox);
     m_castStop = new QPushButton(QStringLiteral("End Broadcast"), castBox);
+    m_castConnect = new QPushButton(QStringLiteral("Connect / Listen"), castBox);
+    m_castCopyPublic = new QPushButton(QStringLiteral("Copy Public Link"), castBox);
     m_castCopyInvite = new QPushButton(QStringLiteral("Copy Invite"), castBox);
     castRow->addWidget(m_castStatus, 1);
+    castRow->addWidget(m_castConnect);
     castRow->addWidget(m_castStart);
     castRow->addWidget(m_castStop);
+    castRow->addWidget(m_castCopyPublic);
     castRow->addWidget(m_castCopyInvite);
     castLayout->addLayout(castRow);
     m_castHint = new QLabel(QStringLiteral(
-        "Start a broadcast, then use /wafflecast in an AIM IM or IRC PM/channel to invite WaffleHouse listeners."), castBox);
+        "Start a broadcast, invite another client, or paste a WaffleCast URL with Connect / Listen. Public browser/VLC links are available while broadcasting."), castBox);
     m_castHint->setWordWrap(true);
     castLayout->addWidget(m_castHint);
     outer->addWidget(castBox);
@@ -524,8 +528,14 @@ void MediaWindow::buildUi()
     });
     connect(remove, &QPushButton::clicked, this, &MediaWindow::removeSelected);
     connect(clear, &QPushButton::clicked, this, &MediaWindow::clearPlaylist);
+    connect(m_castConnect, &QPushButton::clicked, this, &MediaWindow::connectWaffleCastDialog);
     connect(m_castStart, &QPushButton::clicked, this, &MediaWindow::startWaffleCast);
     connect(m_castStop, &QPushButton::clicked, this, &MediaWindow::stopWaffleCast);
+    connect(m_castCopyPublic, &QPushButton::clicked, this, [this] {
+        if (!m_cast || !m_cast->active()) return;
+        QApplication::clipboard()->setText(m_cast->listenPageUrl().toString(QUrl::FullyEncoded));
+        statusBar()->showMessage(QStringLiteral("Public WaffleCast listen link copied. Open it in a browser, or use the M3U/PLS links from that page."), 7000);
+    });
     connect(m_castCopyInvite, &QPushButton::clicked, this, [this] {
         const QString frame = waffleCastInviteFrame();
         if (frame.isEmpty()) return;
@@ -596,8 +606,27 @@ void MediaWindow::startWaffleCast()
     if (!m_albumArtBytes.isEmpty()) m_cast->setCoverArt(m_albumArtBytes, QStringLiteral("image/png"));
     updateWaffleCastUi();
     statusBar()->showMessage(
-        QStringLiteral("WaffleCast started. Use /wafflecast in an AIM or IRC conversation to invite listeners."),
-        10000);
+        QStringLiteral("WaffleCast started. Use /wafflecast for compatible WaffleHouse clients or Copy Public Link for browsers, VLC, mpv, M3U, and PLS listeners."),
+        12000);
+}
+
+void MediaWindow::connectWaffleCastDialog()
+{
+    bool ok = false;
+    const QString text = QInputDialog::getText(
+        this, QStringLiteral("Connect to WaffleCast"),
+        QStringLiteral("Paste a WaffleCast listen, stream, M3U, or PLS URL:"),
+        QLineEdit::Normal, {}, &ok).trimmed();
+    if (!ok || text.isEmpty()) return;
+
+    QUrl supplied = QUrl::fromUserInput(text);
+    const QUrl streamUrl = WaffleCastServer::normalizeListenUrl(supplied);
+    if (!streamUrl.isValid() || streamUrl.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+            QStringLiteral("That does not look like a WaffleCast URL. Paste the public Listen link, direct stream.mp3 URL, listen.m3u, or listen.pls URL."));
+        return;
+    }
+    joinWaffleCast(streamUrl, QString(), supplied.host());
 }
 
 void MediaWindow::stopWaffleCast()
@@ -789,39 +818,46 @@ void MediaWindow::fetchWaffleCastCover()
 
 void MediaWindow::updateWaffleCastUi()
 {
-    if (!m_castStatus || !m_castStart || !m_castStop || !m_castCopyInvite) return;
+    if (!m_castStatus || !m_castStart || !m_castStop || !m_castCopyInvite
+        || !m_castCopyPublic || !m_castConnect) return;
     if (m_cast->active()) {
         const int listeners = m_cast->listenerCount();
         m_castStatus->setText(QStringLiteral("Broadcasting — %1 listener%2 — %3")
             .arg(listeners)
             .arg(listeners == 1 ? QString() : QStringLiteral("s"))
             .arg(m_cast->streamUrl().toString(QUrl::RemovePassword)));
+        m_castConnect->setEnabled(false);
         m_castStart->setEnabled(false);
         m_castStop->setEnabled(true);
         m_castStop->setText(QStringLiteral("End Broadcast"));
+        m_castCopyPublic->setEnabled(true);
         m_castCopyInvite->setEnabled(true);
         m_castHint->setText(QStringLiteral(
-            "Use /wafflecast in an AIM IM, IRC PM, or IRC channel. WaffleHouse clients recognize the invite and offer Listen."));
+            "Use /wafflecast for compatible WaffleHouse listeners. Copy Public Link opens a browser player and also exposes Direct MP3, M3U, and PLS links for VLC/mpv/other players."));
         return;
     }
     if (m_castListening) {
         m_castStatus->setText(m_castRemoteHost.isEmpty()
             ? QStringLiteral("Listening to WaffleCast")
             : QStringLiteral("Listening to WaffleCast from %1").arg(m_castRemoteHost));
+        m_castConnect->setEnabled(false);
         m_castStart->setEnabled(false);
         m_castStop->setEnabled(true);
         m_castStop->setText(QStringLiteral("Leave WaffleCast"));
+        m_castCopyPublic->setEnabled(false);
         m_castCopyInvite->setEnabled(false);
         m_castHint->setText(QStringLiteral("The DJ controls the live stream; track title and embedded artwork update automatically."));
         return;
     }
     m_castStatus->setText(QStringLiteral("Broadcast off"));
+    m_castConnect->setEnabled(true);
     m_castStart->setEnabled(true);
     m_castStop->setEnabled(false);
     m_castStop->setText(QStringLiteral("End Broadcast"));
+    m_castCopyPublic->setEnabled(false);
     m_castCopyInvite->setEnabled(false);
     m_castHint->setText(QStringLiteral(
-        "Start a broadcast, then use /wafflecast in an AIM IM or IRC PM/channel to invite WaffleHouse listeners."));
+        "Start a broadcast, use /wafflecast for native invites, or Connect / Listen with a WaffleCast URL. Non-WaffleHouse listeners can use the public browser/MP3/M3U/PLS links."));
 }
 
 void MediaWindow::showAndRaise()

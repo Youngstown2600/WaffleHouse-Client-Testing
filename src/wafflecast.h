@@ -19,6 +19,9 @@ struct WaffleCastInvite
     bool isValid() const { return streamUrl.isValid() && !streamUrl.isEmpty(); }
     QUrl metadataUrl() const;
     QUrl coverUrl() const;
+    QUrl listenPageUrl() const;
+    QUrl m3uUrl() const;
+    QUrl plsUrl() const;
 
     static QString encode(const QUrl &streamUrl, const QString &title);
     static bool decode(const QString &payload, WaffleCastInvite *invite);
@@ -45,6 +48,9 @@ public:
     QUrl streamUrl() const;
     QUrl metadataUrl() const;
     QUrl coverUrl() const;
+    QUrl listenPageUrl() const;
+    QUrl m3uUrl() const;
+    QUrl plsUrl() const;
     QString inviteFrame() const;
 
     void setTrack(const QString &source,
@@ -56,6 +62,7 @@ public:
     void clearCoverArt();
 
     static QString suggestedAdvertisedHost();
+    static QUrl normalizeListenUrl(const QUrl &url);
 
 signals:
     void listenerCountChanged(int count);

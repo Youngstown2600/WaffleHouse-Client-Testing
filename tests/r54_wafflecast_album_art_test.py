@@ -9,7 +9,7 @@ controller_h=(root/'src/mediacontroller.h').read_text()
 controller_c=(root/'src/mediacontroller.cpp').read_text()
 main=(root/'src/mainwindow.cpp').read_text()
 checks={
- '5.4 alpha identity':'APP_VERSION_STRING="5.4-alpha1"' in cm,
+ '5.4 alpha identity':'APP_VERSION_STRING="5.4-alpha2"' in cm,
  'WaffleCast compiled':'src/wafflecast.cpp' in cm,
  'tokenized stream endpoint':'/wafflecast/%1/%2' in cast_c,
  'multi-listener TCP server':'QTcpServer' in cast_h and 'm_streamClients' in cast_c,
@@ -35,4 +35,4 @@ checks={
 failed=[name for name,ok in checks.items() if not ok]
 for name,ok in checks.items(): print(('PASS' if ok else 'FAIL')+' - '+name)
 if failed: raise SystemExit('FAIL: '+', '.join(failed))
-print(f'\nPASS - {len(checks)} WaffleHouse-Client 5.4 alpha1 WaffleCast/album-art checks')
+print(f'\nPASS - {len(checks)} WaffleHouse-Client 5.4 alpha2 WaffleCast/album-art checks')

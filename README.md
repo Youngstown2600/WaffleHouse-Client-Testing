@@ -1,10 +1,15 @@
-# WaffleHouse-Client 5.4 alpha1
+# WaffleHouse-Client 5.4 alpha2
 
-## 5.4 alpha1 — WaffleCast + embedded album art
+## 5.4 alpha2 — WaffleCast can be joined directly
 
-WaffleHouse-Client 5.4 alpha1 adds **WaffleCast**, a native shared Media Center session for WaffleHouse users. Start a broadcast in Media Center, then type `/wafflecast` (or `/wcast`) from an AIM IM, IRC PM, or IRC channel. Compatible WaffleHouse clients recognize the control frame, show a Listen prompt, and play the host's direct live stream without replacing the listener's persistent local playlist.
+Media Center now has **Connect / Listen** for pasting a WaffleCast URL and **Copy Public Link** while hosting. The public link works in a browser without WaffleHouse and exposes standard MP3, M3U, and PLS listen links for VLC/mpv and other compatible players. AIM/IRC native invites still work.
 
-The Media Center also adds a dedicated **Album Art** panel. Embedded cover art from MP3/M4A/FLAC and related audio files is extracted with ffmpeg, displayed locally, and exposed to WaffleCast listeners as image bytes only. Track title and artwork update while the DJ moves through the playlist. See `WAFFLECAST.md` and `RELEASE-5.4-alpha1.md`.
+
+## 5.4 alpha2 — WaffleCast + embedded album art
+
+WaffleHouse-Client 5.4 alpha2 adds **WaffleCast**, a native shared Media Center session for WaffleHouse users. Start a broadcast in Media Center, then type `/wafflecast` (or `/wcast`) from an AIM IM, IRC PM, or IRC channel. Compatible WaffleHouse clients recognize the control frame, show a Listen prompt, and play the host's direct live stream without replacing the listener's persistent local playlist.
+
+The Media Center also adds a dedicated **Album Art** panel. Embedded cover art from MP3/M4A/FLAC and related audio files is extracted with ffmpeg, displayed locally, and exposed to WaffleCast listeners as image bytes only. Track title and artwork update while the DJ moves through the playlist. See `WAFFLECAST.md` and `RELEASE-5.4-alpha2.md`.
 
 
 ## 5.3 macOS bootstrap + standalone deployment

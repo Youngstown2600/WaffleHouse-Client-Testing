@@ -412,7 +412,7 @@ void CallSession::startSipTraceFile(const std::string& path)
     }
     protectFile(path);
     sipTracePath_ = path;
-    sipTraceFile_ << "# WaffleHouse-Client 5.4 alpha1 single-call SIP trace\n# Call-ID: "
+    sipTraceFile_ << "# WaffleHouse-Client 5.4 alpha2 single-call SIP trace\n# Call-ID: "
                   << snapshot_.callIdString << "\n\n";
     for (const auto& entry : sipTrace_) {
         sipTraceFile_ << formatTraceEntry(entry);

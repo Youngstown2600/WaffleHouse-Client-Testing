@@ -38,6 +38,21 @@ QUrl WaffleCastInvite::coverUrl() const
     return siblingUrl(streamUrl, QStringLiteral("cover"));
 }
 
+QUrl WaffleCastInvite::listenPageUrl() const
+{
+    return siblingUrl(streamUrl, QStringLiteral("listen"));
+}
+
+QUrl WaffleCastInvite::m3uUrl() const
+{
+    return siblingUrl(streamUrl, QStringLiteral("listen.m3u"));
+}
+
+QUrl WaffleCastInvite::plsUrl() const
+{
+    return siblingUrl(streamUrl, QStringLiteral("listen.pls"));
+}
+
 QString WaffleCastInvite::encode(const QUrl &streamUrl, const QString &title)
 {
     QJsonObject object;
@@ -177,6 +192,21 @@ QUrl WaffleCastServer::coverUrl() const
     return siblingUrl(streamUrl(), QStringLiteral("cover"));
 }
 
+QUrl WaffleCastServer::listenPageUrl() const
+{
+    return siblingUrl(streamUrl(), QStringLiteral("listen"));
+}
+
+QUrl WaffleCastServer::m3uUrl() const
+{
+    return siblingUrl(streamUrl(), QStringLiteral("listen.m3u"));
+}
+
+QUrl WaffleCastServer::plsUrl() const
+{
+    return siblingUrl(streamUrl(), QStringLiteral("listen.pls"));
+}
+
 QString WaffleCastServer::inviteFrame() const
 {
     return active() ? WaffleCastInvite::encode(streamUrl(), m_title) : QString();
@@ -244,6 +274,23 @@ QString WaffleCastServer::suggestedAdvertisedHost()
     return QStringLiteral("127.0.0.1");
 }
 
+QUrl WaffleCastServer::normalizeListenUrl(const QUrl &url)
+{
+    if (!url.isValid() || (url.scheme() != QStringLiteral("http")
+        && url.scheme() != QStringLiteral("https"))) return {};
+
+    const QStringList parts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    const int marker = parts.indexOf(QStringLiteral("wafflecast"));
+    if (marker < 0 || marker + 1 >= parts.size()) return {};
+
+    QStringList base = parts.mid(0, marker + 2);
+    QUrl out(url);
+    out.setPath(QStringLiteral("/") + base.join(QLatin1Char('/')) + QStringLiteral("/stream.mp3"));
+    out.setQuery(QString());
+    out.setFragment(QString());
+    return out;
+}
+
 void WaffleCastServer::acceptConnections()
 {
     while (m_server->hasPendingConnections()) {
@@ -289,6 +336,60 @@ void WaffleCastServer::consumeRequest(QTcpSocket *socket)
         m_streamClients.insert(socket);
         emit listenerCountChanged(m_streamClients.size());
         if (!m_paused && !m_idle && m_encoder->state() == QProcess::NotRunning) startEncoder();
+        return;
+    }
+
+    if (path == sessionPath(QString())
+        || path == sessionPath(QStringLiteral("listen"))
+        || path == sessionPath(QStringLiteral("listen.html"))) {
+        const QString escapedTitle = (m_title.trimmed().isEmpty()
+            ? QStringLiteral("WaffleCast Live") : m_title.trimmed()).toHtmlEscaped();
+        const QString page = QStringLiteral(R"HTML(<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%1 — WaffleCast</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;display:grid;place-items:center;min-height:100vh}
+main{width:min(92vw,560px);background:#1d1d1d;border:1px solid #444;border-radius:14px;padding:22px;box-sizing:border-box}
+h1{margin:0 0 4px;font-size:1.4rem}.sub{color:#aaa;margin-bottom:18px}#cover{display:block;width:min(70vw,320px);height:min(70vw,320px);object-fit:contain;background:#090909;margin:0 auto 18px;border-radius:8px}audio{width:100%}.links{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.links a{color:#9dd2ff}.status{color:#bbb;margin-top:12px;font-size:.92rem}
+</style>
+</head>
+<body><main>
+<h1 id="title">%1</h1><div class="sub">WaffleCast live broadcast</div>
+<img id="cover" src="cover" alt="Album art" onerror="this.style.display='none'">
+<audio controls autoplay src="stream.mp3"></audio>
+<div class="status" id="status">Connecting…</div>
+<div class="links"><a href="stream.mp3">Direct MP3</a><a href="listen.m3u">M3U</a><a href="listen.pls">PLS</a></div>
+<script>
+let cg=-1;
+async function poll(){try{const r=await fetch('meta.json',{cache:'no-store'});if(!r.ok)return;const m=await r.json();
+if(m.title)document.getElementById('title').textContent=m.title;
+document.getElementById('status').textContent=(m.paused?'DJ paused':'Live')+' — '+m.listeners+' listener'+(m.listeners===1?'':'s');
+if(m.cover_generation!==cg){cg=m.cover_generation;const i=document.getElementById('cover');i.style.display='block';i.src='cover?g='+cg;}
+}catch(e){document.getElementById('status').textContent='Stream metadata unavailable';}}
+poll();setInterval(poll,2500);
+</script>
+</main></body></html>)HTML").arg(escapedTitle);
+        writeResponse(socket, 200, "OK", "text/html; charset=utf-8", page.toUtf8());
+        return;
+    }
+
+    if (path == sessionPath(QStringLiteral("listen.m3u"))) {
+        const QByteArray body = QStringLiteral("#EXTM3U\n#EXTINF:-1,%1\n%2\n")
+            .arg(m_title.trimmed().isEmpty() ? QStringLiteral("WaffleCast") : m_title.trimmed(),
+                 streamUrl().toString(QUrl::FullyEncoded)).toUtf8();
+        writeResponse(socket, 200, "OK", "audio/x-mpegurl; charset=utf-8", body);
+        return;
+    }
+
+    if (path == sessionPath(QStringLiteral("listen.pls"))) {
+        const QByteArray body = QStringLiteral(
+            "[playlist]\nNumberOfEntries=1\nFile1=%1\nTitle1=%2\nLength1=-1\nVersion=2\n")
+            .arg(streamUrl().toString(QUrl::FullyEncoded),
+                 m_title.trimmed().isEmpty() ? QStringLiteral("WaffleCast") : m_title.trimmed()).toUtf8();
+        writeResponse(socket, 200, "OK", "audio/x-scpls; charset=utf-8", body);
         return;
     }
 

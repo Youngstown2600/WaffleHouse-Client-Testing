@@ -1,6 +1,6 @@
-# WaffleHouse-Client 5.4 alpha1 — Media Center
+# WaffleHouse-Client 5.4 alpha2 — Media Center
 
-## Album Art and WaffleCast (5.4 alpha1)
+## Album Art and WaffleCast (5.4 alpha2)
 
 The Now Playing area includes a 180x180 Album Art panel. For supported local audio files, WaffleHouse uses ffmpeg to extract the first embedded/attached cover image into memory and converts it to PNG for display. The music file itself is not exposed.
 

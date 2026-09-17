@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=WaffleHouse-Client 5.4 alpha1
+Comment=Modular multi-protocol communications client: AIM/OSCAR, IRC, Telnet/BBS, SIP, XMPP, SSH, NNTP, Gopher, Gemini, Mosh and media
+Exec=wafflehouse-client
+Icon=wafflehouse-client
+Terminal=false
+Categories=Network;Chat;InstantMessaging;AudioVideo;

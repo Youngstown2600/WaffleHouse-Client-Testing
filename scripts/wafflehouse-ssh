@@ -1,0 +1,474 @@
+#!/usr/bin/env python3
+"""WaffleHouse-Client 5.4 alpha1 SSH media/SIP companion.
+
+The full WaffleHouse-Client runs on the remote shell server.  This lightweight
+local program creates three reverse SSH stream-local forwards and bridges them
+to the local speaker/microphone:
+  * WaffleRadio/media: PCM16, 48 kHz, stereo
+  * SIP playback:      PCM16, 16 kHz, mono
+  * SIP microphone:    PCM16, 16 kHz, mono
+
+No media TCP port is opened on the server; all three streams travel inside SSH.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import secrets
+import select
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import threading
+import time
+from dataclasses import dataclass
+from typing import Optional, Sequence
+
+MUSIC_RATE = 48000
+MUSIC_CHANNELS = 2
+SIP_RATE = 16000
+SIP_CHANNELS = 1
+SIP_FRAME_BYTES = SIP_RATE * 2 * 20 // 1000  # 20 ms signed PCM16 mono
+
+COMPANION_VERSION = "5.4-alpha1"
+TARGET_CLIENT_VERSION = "5.4-alpha1"
+
+_stop = threading.Event()
+_print_lock = threading.Lock()
+_children: set[subprocess.Popen] = set()
+_children_lock = threading.Lock()
+
+
+def note(message: str) -> None:
+    with _print_lock:
+        print(f"[wafflehouse-ssh] {message}", file=sys.stderr, flush=True)
+
+
+def is_termux() -> bool:
+    prefix = os.environ.get("PREFIX", "")
+    return bool(os.environ.get("TERMUX_VERSION")) or "com.termux" in prefix
+
+
+def which(name: str) -> Optional[str]:
+    return shutil.which(name)
+
+
+def register_child(proc: subprocess.Popen) -> subprocess.Popen:
+    with _children_lock:
+        _children.add(proc)
+    return proc
+
+
+def unregister_child(proc: subprocess.Popen) -> None:
+    with _children_lock:
+        _children.discard(proc)
+
+
+def terminate_child(proc: Optional[subprocess.Popen]) -> None:
+    if proc is None:
+        return
+    unregister_child(proc)
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=0.75)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def terminate_all_children() -> None:
+    with _children_lock:
+        children = list(_children)
+    for proc in children:
+        terminate_child(proc)
+
+
+def player_command(rate: int, channels: int) -> Sequence[str]:
+    mpv = which("mpv")
+    if mpv:
+        channel_name = "mono" if channels == 1 else "stereo"
+        return [
+            mpv,
+            "--no-video",
+            "--audio-display=no",
+            "--really-quiet",
+            "--demuxer=rawaudio",
+            "--demuxer-rawaudio-format=s16le",
+            f"--demuxer-rawaudio-rate={rate}",
+            f"--demuxer-rawaudio-channels={channel_name}",
+            "-",
+        ]
+    ffplay = which("ffplay")
+    if ffplay:
+        return [
+            ffplay, "-nodisp", "-autoexit", "-loglevel", "error",
+            "-f", "s16le", "-ar", str(rate), "-ac", str(channels), "-i", "pipe:0",
+        ]
+    raise RuntimeError("mpv or ffplay is required for local audio playback")
+
+
+def prime_termux_microphone_permission() -> None:
+    """Best-effort Android mic permission preflight via Termux:API.
+
+    termux-microphone-record cannot provide the low-latency stdout stream used
+    for calls, but it is useful for triggering Android's runtime microphone
+    permission before PulseAudio/OpenSL ES is probed.  Never stop a recording
+    that was already active.
+    """
+    if not is_termux():
+        return
+    recorder = which("termux-microphone-record")
+    if not recorder:
+        return
+    cache = os.path.join(os.environ.get("TMPDIR", "/data/data/com.termux/files/usr/tmp"),
+                         f"wh52-mic-{os.getpid()}.m4a")
+    started = False
+    try:
+        result = subprocess.run(
+            [recorder, "-l", "1", "-f", cache], text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=6, check=False,
+        )
+        started = "Recording started" in result.stdout
+        if started:
+            time.sleep(0.20)
+            subprocess.run([recorder, "-q"], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=4, check=False)
+    except Exception:
+        pass
+    finally:
+        if started:
+            try:
+                os.unlink(cache)
+            except OSError:
+                pass
+
+
+def start_termux_pulseaudio() -> None:
+    if not is_termux() or not which("pulseaudio"):
+        return
+    # Starting an already-running daemon is harmless; suppress its normal noise.
+    try:
+        subprocess.run(
+            ["pulseaudio", "--start", "--exit-idle-time=-1"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def pulse_source() -> Optional[str]:
+    pactl = which("pactl")
+    if not pactl:
+        return None
+
+    def list_sources() -> list[str]:
+        try:
+            result = subprocess.run(
+                [pactl, "list", "short", "sources"], text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, check=False,
+            )
+        except Exception:
+            return []
+        out: list[str] = []
+        for line in result.stdout.splitlines():
+            fields = line.split("\t")
+            if len(fields) >= 2 and not fields[1].endswith(".monitor"):
+                out.append(fields[1])
+        return out
+
+    sources = list_sources()
+    if sources:
+        return sources[0]
+
+    if is_termux():
+        # Termux PulseAudio provides a native OpenSL ES microphone source on
+        # supported Android devices.  It may already be loaded; failure here is
+        # non-fatal and the caller will fall back to another capture backend.
+        try:
+            subprocess.run(
+                [pactl, "load-module", "module-sles-source"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=2, check=False,
+            )
+        except Exception:
+            pass
+        sources = list_sources()
+        if sources:
+            return sources[0]
+    return None
+
+
+def capture_command() -> Optional[Sequence[str]]:
+    start_termux_pulseaudio()
+    parec = which("parec")
+    source = pulse_source() if parec else None
+    if parec and source:
+        return [parec, f"--device={source}", "--raw", "--format=s16le",
+                f"--rate={SIP_RATE}", f"--channels={SIP_CHANNELS}"]
+
+    # Desktop ALSA fallback.  This deliberately comes after PulseAudio because
+    # PipeWire/Pulse normally owns the hardware on current Linux desktops.
+    arecord = which("arecord")
+    if arecord and not is_termux():
+        return [arecord, "-q", "-t", "raw", "-f", "S16_LE",
+                "-r", str(SIP_RATE), "-c", str(SIP_CHANNELS)]
+
+    ffmpeg = which("ffmpeg")
+    if ffmpeg and not is_termux():
+        return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-f", "pulse", "-i", "default", "-ac", "1", "-ar", str(SIP_RATE),
+                "-f", "s16le", "pipe:1"]
+    return None
+
+
+@dataclass
+class BridgeListener:
+    name: str
+    mode: str
+    rate: int
+    channels: int
+    sock: socket.socket
+    thread: threading.Thread
+
+    @property
+    def port(self) -> int:
+        return int(self.sock.getsockname()[1])
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def playback_connection(conn: socket.socket, name: str, rate: int, channels: int) -> None:
+    proc: Optional[subprocess.Popen] = None
+    try:
+        cmd = player_command(rate, channels)
+        proc = register_child(subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            bufsize=0,
+        ))
+        assert proc.stdin is not None
+        while not _stop.is_set():
+            data = conn.recv(65536)
+            if not data:
+                break
+            try:
+                proc.stdin.write(data)
+                proc.stdin.flush()
+            except (BrokenPipeError, OSError):
+                break
+    except Exception as exc:
+        note(f"{name} playback error: {exc}")
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+        terminate_child(proc)
+
+
+def capture_connection(conn: socket.socket, force_silence: bool) -> None:
+    proc: Optional[subprocess.Popen] = None
+    warned = False
+    try:
+        cmd = None if force_silence else capture_command()
+        if cmd:
+            note("SIP microphone bridge connected.")
+            proc = register_child(subprocess.Popen(
+                cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, bufsize=0,
+            ))
+        else:
+            warned = True
+            note("No usable microphone capture backend found; SIP receive audio will work, microphone sends silence.")
+
+        conn.settimeout(0.25)
+        next_silence = time.monotonic()
+        while not _stop.is_set():
+            if proc is None or proc.stdout is None:
+                now = time.monotonic()
+                if now < next_silence:
+                    time.sleep(min(0.02, next_silence - now))
+                    continue
+                try:
+                    conn.sendall(b"\x00" * SIP_FRAME_BYTES)
+                except OSError:
+                    break
+                next_silence += 0.020
+                continue
+
+            fd = proc.stdout.fileno()
+            readable, _, _ = select.select([fd], [], [], 0.25)
+            if not readable:
+                if proc.poll() is not None:
+                    terminate_child(proc)
+                    proc = None
+                    if not warned:
+                        note("Microphone capture stopped; switching SIP transmit to silence for this session.")
+                        warned = True
+                    next_silence = time.monotonic()
+                continue
+            data = os.read(fd, 4096)
+            if not data:
+                terminate_child(proc)
+                proc = None
+                continue
+            try:
+                conn.sendall(data)
+            except OSError:
+                break
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+        terminate_child(proc)
+
+
+def listener_loop(listener: BridgeListener, no_sip_mic: bool) -> None:
+    while not _stop.is_set():
+        try:
+            conn, _ = listener.sock.accept()
+        except OSError:
+            break
+        if listener.mode == "capture":
+            target = lambda c=conn: capture_connection(c, no_sip_mic)
+        else:
+            target = lambda c=conn: playback_connection(c, listener.name, listener.rate, listener.channels)
+        threading.Thread(target=target, daemon=True, name=f"{listener.name}-connection").start()
+
+
+def make_listener(name: str, mode: str, rate: int, channels: int, no_sip_mic: bool) -> BridgeListener:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(4)
+    placeholder = BridgeListener(name, mode, rate, channels, sock, threading.current_thread())
+    thread = threading.Thread(target=listener_loop, args=(placeholder, no_sip_mic), daemon=True,
+                              name=f"{name}-listener")
+    placeholder.thread = thread
+    thread.start()
+    return placeholder
+
+
+def build_ssh_command(args: argparse.Namespace, token: str,
+                      media: BridgeListener, sip_play: BridgeListener,
+                      sip_capture: BridgeListener) -> list[str]:
+    ssh = which("ssh")
+    if not ssh:
+        if args.print_ssh_command:
+            ssh = "ssh"
+        else:
+            raise RuntimeError("OpenSSH client (ssh) was not found")
+
+    # WaffleHouse-Client 5.3 intentionally retains the established wh35
+    # socket namespace so existing shell-server deployments stay compatible.
+    base = f"/tmp/wh35-{token}"
+    cmd = [
+        ssh,
+        "-tt",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "StreamLocalBindUnlink=yes",
+        "-o", "StreamLocalBindMask=0177",
+        "-R", f"{base}-media.sock:127.0.0.1:{media.port}",
+        "-R", f"{base}-sip-play.sock:127.0.0.1:{sip_play.port}",
+        "-R", f"{base}-sip-capture.sock:127.0.0.1:{sip_capture.port}",
+    ]
+    if args.port:
+        cmd += ["-p", str(args.port)]
+    if args.identity:
+        cmd += ["-i", args.identity]
+    if args.ssh_option:
+        for option in args.ssh_option:
+            cmd += ["-o", option]
+    cmd.append(args.destination)
+    cmd += [args.remote_shell, "--bridge-token", token]
+    return cmd
+
+
+def preflight(termux_requested: bool) -> None:
+    if termux_requested and not is_termux():
+        note("--termux was requested outside Termux; continuing with available local audio tools.")
+    if not which("ssh"):
+        raise RuntimeError("OpenSSH is required. Install the ssh client first.")
+    if not (which("mpv") or which("ffplay")):
+        raise RuntimeError("mpv or ffplay is required for remote media/SIP playback")
+    if is_termux():
+        prime_termux_microphone_permission()
+        start_termux_pulseaudio()
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="wafflehouse-ssh",
+        description="Connect to WaffleHouse-Client 5.4 alpha1 on a shell server with encrypted local media and SIP audio.",
+    )
+    p.add_argument("--version", action="version", version=f"WaffleHouse-SSH-Companion {COMPANION_VERSION}")
+    p.add_argument("destination", help="SSH destination, e.g. alice@waffle.example.net")
+    p.add_argument("-p", "--port", type=int, help="SSH port")
+    p.add_argument("-i", "--identity", help="SSH private key")
+    p.add_argument("-o", "--ssh-option", action="append", help="additional OpenSSH -o option (repeatable)")
+    p.add_argument("--remote-shell", default="wafflehouse-shell",
+                   help="server-side WaffleHouse shell wrapper (default: wafflehouse-shell)")
+    p.add_argument("--termux", action="store_true", help="force/announce Termux companion mode")
+    p.add_argument("--no-sip-mic", action="store_true",
+                   help="receive SIP audio but intentionally transmit silence")
+    p.add_argument("--print-ssh-command", action="store_true",
+                   help="print the generated SSH command with temporary ports, then exit")
+    return p.parse_args(argv)
+
+
+def main(argv: Sequence[str]) -> int:
+    args = parse_args(argv)
+    if not args.print_ssh_command:
+        preflight(args.termux)
+
+    token = secrets.token_hex(16)
+    listeners = [
+        make_listener("media", "playback", MUSIC_RATE, MUSIC_CHANNELS, args.no_sip_mic),
+        make_listener("sip-playback", "playback", SIP_RATE, SIP_CHANNELS, args.no_sip_mic),
+        make_listener("sip-capture", "capture", SIP_RATE, SIP_CHANNELS, args.no_sip_mic),
+    ]
+    try:
+        cmd = build_ssh_command(args, token, listeners[0], listeners[1], listeners[2])
+        if args.print_ssh_command:
+            print(" ".join(cmd))
+            return 0
+
+        note("WaffleHouse-Client 5.4 alpha1 companion ready: media + full-duplex SIP are carried inside SSH.")
+        if is_termux() or args.termux:
+            note("Termux mode active. Android microphone uses the Termux PulseAudio/OpenSL ES source when available.")
+        proc = register_child(subprocess.Popen(cmd))
+        try:
+            return int(proc.wait())
+        finally:
+            unregister_child(proc)
+    finally:
+        _stop.set()
+        for listener in listeners:
+            listener.close()
+        terminate_all_children()
+
+
+if __name__ == "__main__":
+    def _handle_signal(signum, _frame):
+        _stop.set()
+        terminate_all_children()
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _handle_signal)
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        raise SystemExit(130)
+    except Exception as exc:
+        note(f"fatal: {exc}")
+        raise SystemExit(1)

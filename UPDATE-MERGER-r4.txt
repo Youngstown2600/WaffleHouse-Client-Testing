@@ -1,0 +1,12 @@
+Update Merger r4 — SSH interactive input hotfix
+
+WaffleHouse-Client
+
+Fixes:
+- SSH password and keyboard input is forwarded into the embedded PTY.
+- Terminal raw-byte dispatch accepts both Telnet and SSH sessions.
+- Terminal windows automatically take keyboard focus when shown.
+- The SSH terminal hint explains that password entry is intentionally invisible and Enter submits it.
+- SSH regression coverage now validates the actual terminalBytesSubmitted dispatch block.
+
+The r3 contextual-command cleanup is retained: the Command Palette remains removed.

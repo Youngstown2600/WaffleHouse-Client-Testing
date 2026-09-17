@@ -1,0 +1,9 @@
+WaffleHouse-Client 5.1 platform matrix
+========================================
+Linux / Unix : GUI + CLI, shared OSCAR/NINA core, build.sh -> scripts/build-unix.sh
+FreeBSD      : GUI + CLI, shared OSCAR/NINA core, build.sh -> scripts/build-unix.sh
+macOS        : GUI + CLI, shared OSCAR/NINA core, build.sh -> scripts/build-macos.sh
+Windows 10/11: GUI + CLI, shared OSCAR/NINA core, build-windows.ps1 -> MSYS2/UCRT64
+Termux       : GUI + CLI, shared OSCAR/NINA core, scripts/build-termux.sh; GUI requires Termux:X11 runtime
+
+Both frontends are modes of the same WaffleHouse executable (`--gui` / `--cli`) and therefore cannot drift into separate OSCAR implementations.

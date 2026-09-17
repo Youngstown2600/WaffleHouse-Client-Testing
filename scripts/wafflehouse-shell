@@ -1,0 +1,61 @@
+#!/bin/sh
+# WaffleHouse-Client 5.2 restricted-login wrapper.
+# Works as a normal login command and as an sshd ForceCommand target.
+set -u
+
+fail() { printf '%s\n' "wafflehouse-shell: $*" >&2; exit 64; }
+
+token=""
+if [ "${1-}" = "--bridge-token" ]; then
+    [ "$#" -eq 2 ] || fail "usage: wafflehouse-shell [--bridge-token HEX]"
+    token=$2
+elif [ "$#" -ne 0 ]; then
+    fail "usage: wafflehouse-shell [--bridge-token HEX]"
+elif [ -n "${SSH_ORIGINAL_COMMAND-}" ]; then
+    case "$SSH_ORIGINAL_COMMAND" in
+        "wafflehouse-shell --bridge-token "*) token=${SSH_ORIGINAL_COMMAND#wafflehouse-shell --bridge-token } ;;
+        "/usr/local/bin/wafflehouse-shell --bridge-token "*) token=${SSH_ORIGINAL_COMMAND#/usr/local/bin/wafflehouse-shell --bridge-token } ;;
+        *) fail "command not permitted" ;;
+    esac
+fi
+
+export WAFFLEHOUSE_SHELL_SESSION=1
+export WAFFLEHOUSE_SIP_EPHEMERAL_PORTS=1
+
+cleanup_sockets() {
+    [ -n "$token" ] || return 0
+    rm -f -- "/tmp/wh35-$token-media.sock" \
+              "/tmp/wh35-$token-sip-play.sock" \
+              "/tmp/wh35-$token-sip-capture.sock"
+}
+
+if [ -n "$token" ]; then
+    [ "${#token}" -eq 32 ] || fail "invalid bridge token"
+    case "$token" in *[!0123456789abcdefABCDEF]*) fail "invalid bridge token" ;; esac
+    export WAFFLEHOUSE_REMOTE_MEDIA_SOCKET="/tmp/wh35-$token-media.sock"
+    export WAFFLEHOUSE_REMOTE_SIP_PLAY_SOCKET="/tmp/wh35-$token-sip-play.sock"
+    export WAFFLEHOUSE_REMOTE_SIP_CAPTURE_SOCKET="/tmp/wh35-$token-sip-capture.sock"
+    trap 'cleanup_sockets' EXIT HUP INT TERM
+fi
+
+if [ -n "${WAFFLEHOUSE_CLIENT_BIN-}" ] && [ -x "$WAFFLEHOUSE_CLIENT_BIN" ]; then
+    client=$WAFFLEHOUSE_CLIENT_BIN
+elif command -v wafflehouse-client >/dev/null 2>&1; then
+    client=$(command -v wafflehouse-client)
+elif [ -x /usr/local/bin/wafflehouse-client ]; then
+    client=/usr/local/bin/wafflehouse-client
+elif [ -x /usr/bin/wafflehouse-client ]; then
+    client=/usr/bin/wafflehouse-client
+else
+    fail "wafflehouse-client executable not found"
+fi
+
+if [ -z "$token" ]; then
+    exec "$client" --cli
+fi
+
+"$client" --cli
+rc=$?
+cleanup_sockets
+trap - EXIT HUP INT TERM
+exit "$rc"

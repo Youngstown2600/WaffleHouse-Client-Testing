@@ -12,7 +12,7 @@
 #define APP_EXECUTABLE "wafflehouse-client"
 #endif
 #ifndef APP_VERSION_STRING
-#define APP_VERSION_STRING "5.4-alpha2"
+#define APP_VERSION_STRING "5.5"
 #endif
 
 inline QString appDisplayName() { return QString::fromUtf8(APP_DISPLAY_NAME); }

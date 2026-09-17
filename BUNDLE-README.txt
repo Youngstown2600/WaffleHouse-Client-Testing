@@ -1,4 +1,4 @@
-WaffleHouse-Client 5.4 alpha2 — WaffleCast Public Listening Source Bundle
+WaffleHouse-Client 5.5 — WaffleCast Public Listening Source Bundle
 
 Highlights:
 - WaffleHouse clients can manually join a broadcast with Media Center > Connect / Listen.
@@ -8,4 +8,4 @@ Highlights:
 - Live title, cover art, pause status, and listener count remain available to WaffleHouse listeners.
 - 5.3 Stop/Play, Pause/Play, and single-instance fixes are retained.
 
-See WAFFLECAST.md, RELEASE-5.4-alpha2.md, and VALIDATION.md.
+See WAFFLECAST.md, RELEASE-5.5.md, and VALIDATION.md.

@@ -52,7 +52,7 @@ require('src/mainwindow.cpp', 'setMinimumSize(580, 430);', 'main window minimum 
 
 # SSH companion import stays additive to the PTY GUI backend.
 checks.append(((root/'scripts/wafflehouse-ssh').exists(), 'SSH companion launcher included'))
-require('scripts/wafflehouse-ssh', 'COMPANION_VERSION = "5.4-alpha2"', 'SSH companion version updated for 5.4 alpha2')
+require('scripts/wafflehouse-ssh', 'COMPANION_VERSION = "5.5"', 'SSH companion version updated for 5.5')
 require('scripts/wafflehouse-ssh', 'ExitOnForwardFailure=yes', 'SSH companion preserves safe forwarding checks')
 require('scripts/wafflehouse-ssh', 'StreamLocalBindUnlink=yes', 'SSH companion uses reverse Unix-socket forwarding')
 require('CMakeLists.txt', 'install(PROGRAMS scripts/wafflehouse-ssh', 'Unix install includes SSH companion when SSH is enabled')

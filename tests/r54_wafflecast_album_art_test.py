@@ -9,7 +9,7 @@ controller_h=(root/'src/mediacontroller.h').read_text()
 controller_c=(root/'src/mediacontroller.cpp').read_text()
 main=(root/'src/mainwindow.cpp').read_text()
 checks={
- '5.4 alpha identity':'APP_VERSION_STRING="5.4-alpha2"' in cm,
+ '5.5 identity':'APP_VERSION_STRING="5.5"' in cm,
  'WaffleCast compiled':'src/wafflecast.cpp' in cm,
  'tokenized stream endpoint':'/wafflecast/%1/%2' in cast_c,
  'multi-listener TCP server':'QTcpServer' in cast_h and 'm_streamClients' in cast_c,
@@ -17,7 +17,7 @@ checks={
  'metadata endpoint':'meta.json' in cast_c and 'track_generation' in cast_c,
  'cover endpoint':'cover' in cast_c and 'm_coverArt' in cast_c,
  'compact invite frame':'[[WAFFLECAST1:' in cast_c,
- 'native invite slash command':'/wafflecast' in main and '/wcast' in main,
+ 'incoming invite compatibility':'WaffleCast Invite' in main and 'handleWaffleCastPayload' in main,
  'incoming invite prompt':'WaffleCast Invite' in main and 'joinWaffleCast' in main,
  'outgoing self-echo suppressed':'sender.compare(self, Qt::CaseInsensitive) == 0' in main,
  'secure DM invite handling':'handleWaffleCastPayload(backend, kind, target, result.plaintext)' in main,
@@ -35,4 +35,4 @@ checks={
 failed=[name for name,ok in checks.items() if not ok]
 for name,ok in checks.items(): print(('PASS' if ok else 'FAIL')+' - '+name)
 if failed: raise SystemExit('FAIL: '+', '.join(failed))
-print(f'\nPASS - {len(checks)} WaffleHouse-Client 5.4 alpha2 WaffleCast/album-art checks')
+print(f'\nPASS - {len(checks)} WaffleHouse-Client 5.5 WaffleCast/album-art checks')

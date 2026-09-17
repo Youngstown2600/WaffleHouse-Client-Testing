@@ -10,6 +10,7 @@
 class QProcess;
 class QTcpServer;
 class QTcpSocket;
+class QUdpSocket;
 
 struct WaffleCastInvite
 {
@@ -36,12 +37,14 @@ public:
 
     bool start(const QString &ffmpegExecutable,
                const QString &advertisedHost,
-               quint16 port,
+               quint16 listenPort,
+               quint16 advertisedPort,
                QString *error = nullptr);
     void stop();
 
     bool active() const;
     quint16 listeningPort() const;
+    quint16 advertisedPort() const { return m_advertisedPort; }
     int listenerCount() const;
     QString advertisedHost() const { return m_advertisedHost; }
     QString currentTitle() const { return m_title; }
@@ -63,6 +66,7 @@ public:
 
     static QString suggestedAdvertisedHost();
     static QUrl normalizeListenUrl(const QUrl &url);
+    static quint16 discoveryPort() { return 8172; }
 
 signals:
     void listenerCountChanged(int count);
@@ -74,6 +78,7 @@ private slots:
     void acceptConnections();
     void encoderReadyRead();
     void encoderFinished(int exitCode);
+    void discoveryReadyRead();
 
 private:
     void consumeRequest(QTcpSocket *socket);
@@ -90,12 +95,14 @@ private:
     QString sessionPath(const QString &leaf) const;
 
     QTcpServer *m_server = nullptr;
+    QUdpSocket *m_discovery = nullptr;
     QProcess *m_encoder = nullptr;
     QSet<QTcpSocket *> m_streamClients;
     QHash<QTcpSocket *, QByteArray> m_requestBuffers;
 
     QString m_ffmpeg;
     QString m_advertisedHost;
+    quint16 m_advertisedPort = 0;
     QString m_token;
     QString m_source;
     QString m_title;

@@ -1,10 +1,10 @@
-# WaffleHouse-Client 5.4 alpha2 — Media Center
+# WaffleHouse-Client 5.5 — Media Center
 
-## Album Art and WaffleCast (5.4 alpha2)
+## Album Art and WaffleCast (5.5)
 
 The Now Playing area includes a 180x180 Album Art panel. For supported local audio files, WaffleHouse uses ffmpeg to extract the first embedded/attached cover image into memory and converts it to PNG for display. The music file itself is not exposed.
 
-WaffleCast lets the current Media Center source be broadcast to other WaffleHouse clients. The host uses ffmpeg to produce a real-time 128 kbit/s MP3 stream. AIM/IRC carries only the compact tokenized invite (`/wafflecast` or `/wcast`); listeners play the stream through the existing mpv backend. Listener playback is transient, so it does not overwrite the persistent Media Center queue. Tokenized metadata and cover endpoints keep the listener's title/art display synchronized with the DJ.
+WaffleCast lets the current Media Center source be broadcast to other WaffleHouse clients. The host uses ffmpeg to produce a real-time 128 kbit/s MP3 stream. AIM/IRC may carry the compact tokenized invite when **Copy Invite** is sent through a conversation; listeners play the stream through the existing mpv backend. WaffleCast operation in the GUI does not depend on slash commands. Listener playback is transient, so it does not overwrite the persistent Media Center queue. Tokenized metadata and cover endpoints keep the listener's title/art display synchronized with the DJ.
 
 
 The WaffleHouse Media Center is the integrated mpv-backed local-media and internet-radio player. The same persistent media library is shared by the GUI and CLI on supported desktop/Unix builds and Termux where Media is enabled.
@@ -66,3 +66,7 @@ Stop preserves the current queue. After a restart, Play/Resume restores the save
 The media engine controls an external `mpv` process through JSON IPC. Linux and FreeBSD use a private native Unix-domain socket; `ffmpeg` remains available for the SSH companion/remote-audio path and broad codec support. HLS `.m3u8` manifests intended as one continuous stream should be opened with **Stream URL** or `/mstream`; ordinary station/media playlists should use **Playlist URL** / **Import Playlist** / `/mplaylist`.
 
 The dedicated YouTube resolver remains intentionally absent; mpv runs with `--ytdl=no` and WaffleHouse does not require yt-dlp/Deno.
+
+### WaffleCast Internet broadcast settings (5.5)
+
+The Media Center WaffleCast panel includes **Broadcast Settings**. Internet broadcasters can save a public IP/DDNS hostname, local listen port, and separate public/WAN port. This supports normal router and pfSense NAT/port-forwarding layouts. Remote clients may connect with only the public `http://host:port`; the active tokenized stream is resolved automatically. LAN discovery continues to use the broadcaster's LAN endpoint directly.

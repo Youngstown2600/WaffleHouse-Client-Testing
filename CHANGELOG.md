@@ -1,3 +1,12 @@
+# WaffleHouse-Client 5.5 — Remote WaffleCast broadcasting
+
+- Added saved Media Center **Broadcast Settings** for WaffleCast.
+- Added separate local listen TCP port and advertised public/WAN TCP port.
+- Added persistent public IP/DDNS configuration for AIM invites and public listen links.
+- LAN discovery now prefers the UDP sender/local TCP endpoint, avoiding NAT hairpin requirements when public advertising is enabled.
+- Manual remote Connect / Listen preserves the exact public host/port used to reach `/.well-known/wafflecast` and resolves the current tokenized stream path automatically.
+- Existing public browser, VLC/mpv, M3U/PLS, album-art, Stop/Play, Pause/Play, and single-instance behavior retained.
+
 # WaffleHouse-Client 5.x Changelog
 
 ## 5.3 single-instance hotfix r4

@@ -8,6 +8,7 @@
 #include <QProcess>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QUdpSocket>
 #include <QUuid>
 
 namespace {
@@ -88,10 +89,12 @@ bool WaffleCastInvite::decode(const QString &payload, WaffleCastInvite *invite)
 WaffleCastServer::WaffleCastServer(QObject *parent)
     : QObject(parent),
       m_server(new QTcpServer(this)),
+      m_discovery(new QUdpSocket(this)),
       m_encoder(new QProcess(this))
 {
     m_encoder->setProcessChannelMode(QProcess::SeparateChannels);
     connect(m_server, &QTcpServer::newConnection, this, &WaffleCastServer::acceptConnections);
+    connect(m_discovery, &QUdpSocket::readyRead, this, &WaffleCastServer::discoveryReadyRead);
     connect(m_encoder, &QProcess::readyReadStandardOutput, this, &WaffleCastServer::encoderReadyRead);
     connect(m_encoder, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus) { encoderFinished(exitCode); });
@@ -104,12 +107,14 @@ WaffleCastServer::~WaffleCastServer()
 
 bool WaffleCastServer::start(const QString &ffmpegExecutable,
                              const QString &advertisedHost,
-                             quint16 port,
+                             quint16 listenPort,
+                             quint16 advertisedPort,
                              QString *error)
 {
     stop();
     m_ffmpeg = ffmpegExecutable.trimmed();
     m_advertisedHost = advertisedHost.trimmed();
+    m_advertisedPort = advertisedPort;
     if (m_ffmpeg.isEmpty()) {
         if (error) *error = QStringLiteral("ffmpeg is required to broadcast WaffleCast audio.");
         return false;
@@ -118,11 +123,17 @@ bool WaffleCastServer::start(const QString &ffmpegExecutable,
         if (error) *error = QStringLiteral("Enter the hostname or IP address listeners should use.");
         return false;
     }
+    if (m_advertisedPort == 0) m_advertisedPort = listenPort;
     m_token = QUuid::createUuid().toString(QUuid::WithoutBraces).remove(QLatin1Char('-'));
-    if (!m_server->listen(QHostAddress::Any, port)) {
+    if (!m_server->listen(QHostAddress::Any, listenPort)) {
         if (error) *error = m_server->errorString();
         m_token.clear();
         return false;
+    }
+    if (!m_discovery->bind(QHostAddress::AnyIPv4, discoveryPort(),
+                           QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        emit statusMessage(QStringLiteral("WaffleCast LAN discovery unavailable on UDP %1: %2")
+                           .arg(discoveryPort()).arg(m_discovery->errorString()));
     }
     emit broadcastStateChanged(true);
     emit statusMessage(QStringLiteral("WaffleCast is live on port %1.").arg(m_server->serverPort()));
@@ -142,8 +153,10 @@ void WaffleCastServer::stop()
     m_streamClients.clear();
     m_requestBuffers.clear();
     if (m_server->isListening()) m_server->close();
+    if (m_discovery->state() != QAbstractSocket::UnconnectedState) m_discovery->close();
     m_token.clear();
     m_ffmpeg.clear();
+    m_advertisedPort = 0;
     if (wasActive) {
         emit listenerCountChanged(0);
         emit broadcastStateChanged(false);
@@ -177,7 +190,7 @@ QUrl WaffleCastServer::streamUrl() const
     QUrl url;
     url.setScheme(QStringLiteral("http"));
     url.setHost(m_advertisedHost);
-    url.setPort(m_server->serverPort());
+    url.setPort(m_advertisedPort ? m_advertisedPort : m_server->serverPort());
     url.setPath(sessionPath(QStringLiteral("stream.mp3")));
     return url;
 }
@@ -291,6 +304,32 @@ QUrl WaffleCastServer::normalizeListenUrl(const QUrl &url)
     return out;
 }
 
+void WaffleCastServer::discoveryReadyRead()
+{
+    while (m_discovery && m_discovery->hasPendingDatagrams()) {
+        QByteArray datagram;
+        datagram.resize(static_cast<int>(m_discovery->pendingDatagramSize()));
+        QHostAddress sender;
+        quint16 senderPort = 0;
+        if (m_discovery->readDatagram(datagram.data(), datagram.size(), &sender, &senderPort) < 0) continue;
+        if (datagram.trimmed() != QByteArrayLiteral("WAFFLECAST_DISCOVER/1")) continue;
+        if (!active()) continue;
+
+        QJsonObject object;
+        object.insert(QStringLiteral("protocol"), QStringLiteral("WaffleCastDiscovery/1"));
+        object.insert(QStringLiteral("title"), m_title);
+        object.insert(QStringLiteral("stream_url"), streamUrl().toString(QUrl::FullyEncoded));
+        object.insert(QStringLiteral("listen_url"), listenPageUrl().toString(QUrl::FullyEncoded));
+        object.insert(QStringLiteral("host"), m_advertisedHost);
+        object.insert(QStringLiteral("port"), static_cast<int>(advertisedPort()));
+        object.insert(QStringLiteral("local_port"), static_cast<int>(listeningPort()));
+        object.insert(QStringLiteral("stream_path"), sessionPath(QStringLiteral("stream.mp3")));
+        object.insert(QStringLiteral("listen_path"), sessionPath(QStringLiteral("listen")));
+        const QByteArray reply = QJsonDocument(object).toJson(QJsonDocument::Compact);
+        m_discovery->writeDatagram(reply, sender, senderPort);
+    }
+}
+
 void WaffleCastServer::acceptConnections()
 {
     while (m_server->hasPendingConnections()) {
@@ -323,6 +362,25 @@ void WaffleCastServer::consumeRequest(QTcpSocket *socket)
     const QUrl requestUrl = QUrl::fromEncoded(parts.at(1));
     const QString path = requestUrl.path();
     m_requestBuffers.remove(socket);
+
+    if (path == QStringLiteral("/") || path == QStringLiteral("/.well-known/wafflecast")) {
+        QJsonObject object;
+        object.insert(QStringLiteral("protocol"), QStringLiteral("WaffleCastDiscovery/1"));
+        object.insert(QStringLiteral("title"), m_title);
+        object.insert(QStringLiteral("stream_url"), streamUrl().toString(QUrl::FullyEncoded));
+        object.insert(QStringLiteral("listen_url"), listenPageUrl().toString(QUrl::FullyEncoded));
+        object.insert(QStringLiteral("metadata_url"), metadataUrl().toString(QUrl::FullyEncoded));
+        object.insert(QStringLiteral("cover_url"), coverUrl().toString(QUrl::FullyEncoded));
+        object.insert(QStringLiteral("host"), m_advertisedHost);
+        object.insert(QStringLiteral("port"), static_cast<int>(advertisedPort()));
+        object.insert(QStringLiteral("local_port"), static_cast<int>(listeningPort()));
+        object.insert(QStringLiteral("stream_path"), sessionPath(QStringLiteral("stream.mp3")));
+        object.insert(QStringLiteral("listen_path"), sessionPath(QStringLiteral("listen")));
+        object.insert(QStringLiteral("listeners"), m_streamClients.size());
+        writeResponse(socket, 200, "OK", "application/json; charset=utf-8",
+                      QJsonDocument(object).toJson(QJsonDocument::Compact));
+        return;
+    }
 
     if (path == sessionPath(QStringLiteral("stream.mp3"))) {
         QByteArray header;

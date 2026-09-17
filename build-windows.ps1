@@ -42,7 +42,7 @@ $MsysShell = $Candidates | Where-Object { Test-Path $_ } | Select-Object -First 
 if (-not $MsysShell) {
     throw "MSYS2 was not found. Install MSYS2 (UCRT64 recommended), then rerun this builder."
 }
-Write-Host "WaffleHouse-Client 5.4 alpha2 - Windows 10/11 GUI + CLI"
+Write-Host "WaffleHouse-Client 5.5 - Windows 10/11 GUI + CLI"
 Write-Host "Using MSYS2 UCRT64: $MsysShell"
 $Escaped = $Root.Replace("'", "'\"'\"'")
 if ($Protocols -notmatch '^[A-Za-z0-9_, -]+$') { throw "Protocols contains unsupported characters." }

@@ -1,15 +1,19 @@
-# WaffleHouse-Client 5.4 alpha2
+# WaffleHouse-Client 5.5
 
-## 5.4 alpha2 — WaffleCast can be joined directly
+## 5.5 — Remote/Public WaffleCast behind NAT
+
+Media Center now includes **Broadcast Settings** for Internet WaffleCast hosting. Save a public IP or DDNS hostname, a local listen TCP port, and an independent public/WAN TCP port. This supports router/pfSense port forwarding such as `WAN TCP 9119 -> broadcaster TCP 8173`. AIM WaffleCast invites and Copy Public Link advertise the public endpoint automatically, while LAN discovery continues to use the broadcaster's local address directly. Remote WaffleHouse listeners may enter only `http://PUBLIC-HOST:PORT`; the client resolves the active tokenized session automatically.
+
+## 5.5 — WaffleCast can be joined directly
 
 Media Center now has **Connect / Listen** for pasting a WaffleCast URL and **Copy Public Link** while hosting. The public link works in a browser without WaffleHouse and exposes standard MP3, M3U, and PLS listen links for VLC/mpv and other compatible players. AIM/IRC native invites still work.
 
 
-## 5.4 alpha2 — WaffleCast + embedded album art
+## 5.5 — WaffleCast + embedded album art
 
-WaffleHouse-Client 5.4 alpha2 adds **WaffleCast**, a native shared Media Center session for WaffleHouse users. Start a broadcast in Media Center, then type `/wafflecast` (or `/wcast`) from an AIM IM, IRC PM, or IRC channel. Compatible WaffleHouse clients recognize the control frame, show a Listen prompt, and play the host's direct live stream without replacing the listener's persistent local playlist.
+WaffleHouse-Client 5.5 adds **WaffleCast**, a native shared Media Center session for WaffleHouse users. Start a broadcast in Media Center, then let another WaffleHouse client discover the broadcast on the LAN or connect to the host/port directly. AIM/IRC invite frames remain compatible, and listeners play the host's direct live stream without replacing their persistent local playlist.
 
-The Media Center also adds a dedicated **Album Art** panel. Embedded cover art from MP3/M4A/FLAC and related audio files is extracted with ffmpeg, displayed locally, and exposed to WaffleCast listeners as image bytes only. Track title and artwork update while the DJ moves through the playlist. See `WAFFLECAST.md` and `RELEASE-5.4-alpha2.md`.
+The Media Center also adds a dedicated **Album Art** panel. Embedded cover art from MP3/M4A/FLAC and related audio files is extracted with ffmpeg, displayed locally, and exposed to WaffleCast listeners as image bytes only. Track title and artwork update while the DJ moves through the playlist. See `WAFFLECAST.md` and `RELEASE-5.5.md`.
 
 
 ## 5.3 macOS bootstrap + standalone deployment

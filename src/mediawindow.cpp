@@ -11,10 +11,14 @@
 #include <QComboBox>
 #include <QDragEnterEvent>
 #include <QDesktopServices>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDropEvent>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QFont>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -23,7 +27,9 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QHostAddress>
 #include <QNetworkAccessManager>
+#include <QNetworkInterface>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QMimeData>
@@ -33,11 +39,15 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalBlocker>
+#include <QSet>
+#include <QSettings>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTextStream>
 #include <QTimer>
+#include <QUdpSocket>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -399,17 +409,19 @@ void MediaWindow::buildUi()
     m_castStart = new QPushButton(QStringLiteral("Start Broadcast"), castBox);
     m_castStop = new QPushButton(QStringLiteral("End Broadcast"), castBox);
     m_castConnect = new QPushButton(QStringLiteral("Connect / Listen"), castBox);
+    m_castSettings = new QPushButton(QStringLiteral("Broadcast Settings"), castBox);
     m_castCopyPublic = new QPushButton(QStringLiteral("Copy Public Link"), castBox);
     m_castCopyInvite = new QPushButton(QStringLiteral("Copy Invite"), castBox);
     castRow->addWidget(m_castStatus, 1);
     castRow->addWidget(m_castConnect);
+    castRow->addWidget(m_castSettings);
     castRow->addWidget(m_castStart);
     castRow->addWidget(m_castStop);
     castRow->addWidget(m_castCopyPublic);
     castRow->addWidget(m_castCopyInvite);
     castLayout->addLayout(castRow);
     m_castHint = new QLabel(QStringLiteral(
-        "Start a broadcast, invite another client, or paste a WaffleCast URL with Connect / Listen. Public browser/VLC links are available while broadcasting."), castBox);
+        "Start a broadcast or use Connect / Listen. LAN discovery is automatic. Broadcast Settings can advertise a public IP/DNS name and a separate WAN port for Internet listeners behind NAT/pfSense."), castBox);
     m_castHint->setWordWrap(true);
     castLayout->addWidget(m_castHint);
     outer->addWidget(castBox);
@@ -529,6 +541,7 @@ void MediaWindow::buildUi()
     connect(remove, &QPushButton::clicked, this, &MediaWindow::removeSelected);
     connect(clear, &QPushButton::clicked, this, &MediaWindow::clearPlaylist);
     connect(m_castConnect, &QPushButton::clicked, this, &MediaWindow::connectWaffleCastDialog);
+    connect(m_castSettings, &QPushButton::clicked, this, &MediaWindow::configureWaffleCastDialog);
     connect(m_castStart, &QPushButton::clicked, this, &MediaWindow::startWaffleCast);
     connect(m_castStop, &QPushButton::clicked, this, &MediaWindow::stopWaffleCast);
     connect(m_castCopyPublic, &QPushButton::clicked, this, [this] {
@@ -564,6 +577,87 @@ QString MediaWindow::waffleCastTitle() const
     return m_cast ? m_cast->currentTitle() : QString();
 }
 
+void MediaWindow::configureWaffleCastDialog()
+{
+    QSettings settings;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(QStringLiteral("WaffleCast Broadcast Settings"));
+    auto *outer = new QVBoxLayout(&dialog);
+
+    auto *intro = new QLabel(QStringLiteral(
+        "Configure how this WaffleHouse host listens locally and what address it advertises to Internet listeners.\n\n"
+        "For pfSense/NAT, forward TCP from the public/WAN port to this computer's Local listen port. "
+        "The public port may be the same as the local port or different."), &dialog);
+    intro->setWordWrap(true);
+    outer->addWidget(intro);
+
+    auto *form = new QFormLayout;
+    auto *localPort = new QSpinBox(&dialog);
+    localPort->setRange(1024, 65535);
+    localPort->setValue(settings.value(QStringLiteral("Media/WaffleCast/ListenPort"), 8173).toInt());
+    form->addRow(QStringLiteral("Local listen TCP port:"), localPort);
+
+    auto *internetEnabled = new QCheckBox(QStringLiteral("Advertise this broadcast to Internet/remote listeners"), &dialog);
+    internetEnabled->setChecked(settings.value(QStringLiteral("Media/WaffleCast/PublicEnabled"), false).toBool());
+    form->addRow(QString(), internetEnabled);
+
+    auto *publicHost = new QLineEdit(&dialog);
+    publicHost->setPlaceholderText(QStringLiteral("203.0.113.25 or radio.example.net"));
+    publicHost->setText(settings.value(QStringLiteral("Media/WaffleCast/PublicHost")).toString());
+    form->addRow(QStringLiteral("Public IP / DNS hostname:"), publicHost);
+
+    auto *publicPort = new QSpinBox(&dialog);
+    publicPort->setRange(1, 65535);
+    publicPort->setValue(settings.value(QStringLiteral("Media/WaffleCast/PublicPort"), localPort->value()).toInt());
+    form->addRow(QStringLiteral("Public/WAN TCP port:"), publicPort);
+
+    auto updateRemoteControls = [internetEnabled, publicHost, publicPort] {
+        const bool enabled = internetEnabled->isChecked();
+        publicHost->setEnabled(enabled);
+        publicPort->setEnabled(enabled);
+    };
+    connect(internetEnabled, &QCheckBox::toggled, &dialog, [updateRemoteControls](bool) { updateRemoteControls(); });
+    updateRemoteControls();
+    outer->addLayout(form);
+
+    auto *natHint = new QLabel(QStringLiteral(
+        "Example: pfSense WAN TCP 9119 → Kusanagi TCP 8173. Set Local listen port = 8173, "
+        "Public/WAN port = 9119, and Public IP/DNS hostname = your ISP address or DDNS name. "
+        "AIM WaffleCast invites and Copy Public Link will then contain the public address automatically."), &dialog);
+    natHint->setWordWrap(true);
+    outer->addWidget(natHint);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    outer->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    QString host = publicHost->text().trimmed();
+    if (internetEnabled->isChecked()) {
+        if (host.contains(QStringLiteral("://"))) {
+            const QUrl parsed = QUrl::fromUserInput(host);
+            if (parsed.isValid() && !parsed.host().isEmpty()) host = parsed.host();
+        }
+        if (host.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+                                 QStringLiteral("Enter a public IP address or DNS hostname before enabling Internet broadcasting."));
+            return;
+        }
+    }
+
+    settings.setValue(QStringLiteral("Media/WaffleCast/ListenPort"), localPort->value());
+    settings.setValue(QStringLiteral("Media/WaffleCast/PublicEnabled"), internetEnabled->isChecked());
+    settings.setValue(QStringLiteral("Media/WaffleCast/PublicHost"), host);
+    settings.setValue(QStringLiteral("Media/WaffleCast/PublicPort"), publicPort->value());
+    settings.sync();
+
+    statusBar()->showMessage(QStringLiteral("WaffleCast broadcast settings saved. They take effect the next time a broadcast starts."), 7000);
+    updateWaffleCastUi();
+}
+
 void MediaWindow::startWaffleCast()
 {
     if (m_castListening) {
@@ -582,22 +676,31 @@ void MediaWindow::startWaffleCast()
         return;
     }
 
-    bool ok = false;
-    const QString host = QInputDialog::getText(
-        this, QStringLiteral("Start WaffleCast"),
-        QStringLiteral("Hostname or IP listeners should use:\n"
-                       "(LAN IP works on the same network; use a reachable public hostname/IP for Internet listeners.)"),
-        QLineEdit::Normal, WaffleCastServer::suggestedAdvertisedHost(), &ok).trimmed();
-    if (!ok || host.isEmpty()) return;
-
-    const int port = QInputDialog::getInt(
-        this, QStringLiteral("WaffleCast Port"),
-        QStringLiteral("TCP port for the WaffleCast audio stream:"),
-        8173, 1024, 65535, 1, &ok);
-    if (!ok) return;
+    QSettings settings;
+    const quint16 listenPort = static_cast<quint16>(
+        qBound(1024, settings.value(QStringLiteral("Media/WaffleCast/ListenPort"), 8173).toInt(), 65535));
+    const bool publicEnabled = settings.value(QStringLiteral("Media/WaffleCast/PublicEnabled"), false).toBool();
+    QString advertisedHost = publicEnabled
+        ? settings.value(QStringLiteral("Media/WaffleCast/PublicHost")).toString().trimmed()
+        : WaffleCastServer::suggestedAdvertisedHost();
+    quint16 advertisedPort = listenPort;
+    if (publicEnabled) {
+        advertisedPort = static_cast<quint16>(
+            qBound(1, settings.value(QStringLiteral("Media/WaffleCast/PublicPort"), listenPort).toInt(), 65535));
+        if (advertisedHost.contains(QStringLiteral("://"))) {
+            const QUrl parsed = QUrl::fromUserInput(advertisedHost);
+            if (parsed.isValid() && !parsed.host().isEmpty()) advertisedHost = parsed.host();
+        }
+        if (advertisedHost.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+                                 QStringLiteral("Internet broadcasting is enabled but no public IP/DNS hostname is configured. Open Broadcast Settings first."));
+            configureWaffleCastDialog();
+            return;
+        }
+    }
 
     QString error;
-    if (!m_cast->start(m_media->ffmpegExecutable(), host, static_cast<quint16>(port), &error)) {
+    if (!m_cast->start(m_media->ffmpegExecutable(), advertisedHost, listenPort, advertisedPort, &error)) {
         QMessageBox::warning(this, QStringLiteral("WaffleCast"), error);
         return;
     }
@@ -605,28 +708,206 @@ void MediaWindow::startWaffleCast()
     m_cast->setPlaybackState(m_media->paused(), m_media->idle(), m_position);
     if (!m_albumArtBytes.isEmpty()) m_cast->setCoverArt(m_albumArtBytes, QStringLiteral("image/png"));
     updateWaffleCastUi();
-    statusBar()->showMessage(
-        QStringLiteral("WaffleCast started. Use /wafflecast for compatible WaffleHouse clients or Copy Public Link for browsers, VLC, mpv, M3U, and PLS listeners."),
-        12000);
+
+    if (publicEnabled) {
+        statusBar()->showMessage(
+            QStringLiteral("WaffleCast started. Remote listeners/invites use %1:%2; forward TCP %2 on your router/firewall to this machine's TCP %3.")
+                .arg(advertisedHost).arg(advertisedPort).arg(listenPort),
+            14000);
+    } else {
+        statusBar()->showMessage(
+            QStringLiteral("WaffleCast started in LAN mode. Other WaffleHouse clients can discover it automatically. Use Broadcast Settings to advertise a public Internet address."),
+            12000);
+    }
 }
 
 void MediaWindow::connectWaffleCastDialog()
 {
+    // First look for active WaffleCast broadcasters on the local network. The
+    // discovery port is fixed so the audio stream itself can still use any
+    // user-selected TCP port (for example 9119).
+    QUdpSocket discovery;
+    if (discovery.bind(QHostAddress::AnyIPv4, 0,
+                       QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        const QByteArray probe("WAFFLECAST_DISCOVER/1");
+        QSet<QHostAddress> broadcasts;
+        broadcasts.insert(QHostAddress::Broadcast);
+        for (const QNetworkInterface &iface : QNetworkInterface::allInterfaces()) {
+            if (!(iface.flags() & QNetworkInterface::IsUp)
+                || !(iface.flags() & QNetworkInterface::IsRunning)
+                || (iface.flags() & QNetworkInterface::IsLoopBack)) continue;
+            for (const QNetworkAddressEntry &entry : iface.addressEntries()) {
+                if (entry.ip().protocol() == QAbstractSocket::IPv4Protocol
+                    && !entry.broadcast().isNull()) {
+                    broadcasts.insert(entry.broadcast());
+                }
+            }
+        }
+        for (const QHostAddress &address : broadcasts) {
+            discovery.writeDatagram(probe, address, WaffleCastServer::discoveryPort());
+        }
+
+        QEventLoop loop;
+        QTimer timer;
+        timer.setSingleShot(true);
+        connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+        connect(&discovery, &QUdpSocket::readyRead, &loop, &QEventLoop::quit);
+        timer.start(700);
+
+        QList<QJsonObject> found;
+        QSet<QString> seen;
+        while (timer.isActive()) {
+            loop.exec();
+            while (discovery.hasPendingDatagrams()) {
+                QByteArray datagram;
+                datagram.resize(static_cast<int>(discovery.pendingDatagramSize()));
+                QHostAddress sender;
+                quint16 senderPort = 0;
+                if (discovery.readDatagram(datagram.data(), datagram.size(), &sender, &senderPort) < 0) continue;
+                QJsonParseError parseError{};
+                const QJsonDocument doc = QJsonDocument::fromJson(datagram, &parseError);
+                if (parseError.error != QJsonParseError::NoError || !doc.isObject()) continue;
+                const QJsonObject object = doc.object();
+                if (object.value(QStringLiteral("protocol")).toString() != QStringLiteral("WaffleCastDiscovery/1")) continue;
+                const QUrl stream(object.value(QStringLiteral("stream_url")).toString());
+                if (!stream.isValid() || stream.isEmpty()) continue;
+                const QString key = stream.toString(QUrl::FullyEncoded);
+                if (seen.contains(key)) continue;
+                seen.insert(key);
+                QJsonObject enriched = object;
+                enriched.insert(QStringLiteral("sender"), sender.toString());
+                found.append(enriched);
+            }
+            if (!found.isEmpty()) break;
+        }
+
+        if (!found.isEmpty()) {
+            int chosen = 0;
+            if (found.size() > 1) {
+                QStringList choices;
+                for (const QJsonObject &object : found) {
+                    const QString title = object.value(QStringLiteral("title")).toString().trimmed();
+                    const QString sender = object.value(QStringLiteral("sender")).toString().trimmed();
+                    const int localPort = object.value(QStringLiteral("local_port")).toInt(
+                        object.value(QStringLiteral("port")).toInt());
+                    choices << QStringLiteral("%1 — %2:%3")
+                        .arg(title.isEmpty() ? QStringLiteral("WaffleCast") : title, sender)
+                        .arg(localPort);
+                }
+                bool ok = false;
+                const QString selected = QInputDialog::getItem(
+                    this, QStringLiteral("WaffleCast broadcasts found"),
+                    QStringLiteral("Choose a WaffleCast broadcast:"), choices, 0, false, &ok);
+                if (!ok) return;
+                chosen = choices.indexOf(selected);
+                if (chosen < 0) return;
+            }
+            const QJsonObject object = found.at(chosen);
+            const QString senderHost = object.value(QStringLiteral("sender")).toString().trimmed();
+            const int localPort = object.value(QStringLiteral("local_port")).toInt(
+                object.value(QStringLiteral("port")).toInt());
+            const QString streamPath = object.value(QStringLiteral("stream_path")).toString().trimmed();
+
+            // LAN discovery deliberately prefers the UDP sender address plus the
+            // broadcaster's local TCP port. If the host is also advertising a
+            // public/WAN address, LAN listeners do not need NAT reflection/hairpin
+            // support to reach the exact same WaffleCast session.
+            QUrl stream;
+            if (!senderHost.isEmpty() && localPort > 0 && !streamPath.isEmpty()) {
+                stream.setScheme(QStringLiteral("http"));
+                stream.setHost(senderHost);
+                stream.setPort(localPort);
+                stream.setPath(streamPath);
+            } else {
+                stream = QUrl(object.value(QStringLiteral("stream_url")).toString());
+            }
+            const QString title = object.value(QStringLiteral("title")).toString();
+            joinWaffleCast(stream, title, senderHost);
+            return;
+        }
+    }
+
     bool ok = false;
     const QString text = QInputDialog::getText(
         this, QStringLiteral("Connect to WaffleCast"),
-        QStringLiteral("Paste a WaffleCast listen, stream, M3U, or PLS URL:"),
+        QStringLiteral("No LAN broadcast was found automatically.\n\n"
+                       "Enter a WaffleCast host (for example http://10.0.0.2:9119)\n"
+                       "or paste a full Listen/stream URL:"),
         QLineEdit::Normal, {}, &ok).trimmed();
     if (!ok || text.isEmpty()) return;
 
     QUrl supplied = QUrl::fromUserInput(text);
-    const QUrl streamUrl = WaffleCastServer::normalizeListenUrl(supplied);
-    if (!streamUrl.isValid() || streamUrl.isEmpty()) {
-        QMessageBox::warning(this, QStringLiteral("WaffleCast"),
-            QStringLiteral("That does not look like a WaffleCast URL. Paste the public Listen link, direct stream.mp3 URL, listen.m3u, or listen.pls URL."));
+    QUrl streamUrl = WaffleCastServer::normalizeListenUrl(supplied);
+    if (streamUrl.isValid() && !streamUrl.isEmpty()) {
+        joinWaffleCast(streamUrl, QString(), supplied.host());
         return;
     }
-    joinWaffleCast(streamUrl, QString(), supplied.host());
+
+    // A bare http://host:port is intentionally valid. Probe the standard
+    // well-known endpoint and let the broadcaster tell us its current random
+    // session URL/token instead of making the user paste it manually.
+    if (!supplied.isValid()
+        || (supplied.scheme() != QStringLiteral("http") && supplied.scheme() != QStringLiteral("https"))
+        || supplied.host().isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+            QStringLiteral("Enter a valid WaffleCast host such as http://10.0.0.2:9119, or paste a full WaffleCast URL."));
+        return;
+    }
+
+    QUrl probe = supplied;
+    probe.setPath(QStringLiteral("/.well-known/wafflecast"));
+    probe.setQuery(QString());
+    probe.setFragment(QString());
+    QNetworkRequest request(probe);
+    request.setRawHeader("Cache-Control", "no-cache");
+    QNetworkReply *reply = m_network->get(request);
+    QEventLoop loop;
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    timeout.start(2500);
+    loop.exec();
+
+    if (!timeout.isActive() && !reply->isFinished()) reply->abort();
+    const QByteArray bytes = reply->readAll();
+    const QNetworkReply::NetworkError networkError = reply->error();
+    reply->deleteLater();
+    if (networkError != QNetworkReply::NoError) {
+        QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+            QStringLiteral("No WaffleCast broadcast answered at %1.\n\n"
+                           "Check that the host is broadcasting and that the TCP port is reachable.")
+                .arg(supplied.toString(QUrl::RemovePassword)));
+        return;
+    }
+
+    QJsonParseError parseError{};
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()
+        || doc.object().value(QStringLiteral("protocol")).toString() != QStringLiteral("WaffleCastDiscovery/1")) {
+        QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+            QStringLiteral("The host answered, but it is not advertising an active WaffleCast stream."));
+        return;
+    }
+    const QJsonObject object = doc.object();
+    const QString streamPath = object.value(QStringLiteral("stream_path")).toString().trimmed();
+    if (!streamPath.isEmpty()) {
+        // Preserve the exact host/port the listener successfully used for the
+        // discovery probe. This works for a LAN address, a public IPv4/IPv6
+        // address, or a DDNS hostname and does not depend on NAT hairpinning.
+        streamUrl = supplied;
+        streamUrl.setPath(streamPath);
+        streamUrl.setQuery(QString());
+        streamUrl.setFragment(QString());
+    } else {
+        streamUrl = QUrl(object.value(QStringLiteral("stream_url")).toString());
+    }
+    if (!streamUrl.isValid() || streamUrl.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("WaffleCast"),
+            QStringLiteral("The WaffleCast host did not return a usable stream URL."));
+        return;
+    }
+    joinWaffleCast(streamUrl, object.value(QStringLiteral("title")).toString(), supplied.host());
 }
 
 void MediaWindow::stopWaffleCast()
@@ -819,7 +1100,14 @@ void MediaWindow::fetchWaffleCastCover()
 void MediaWindow::updateWaffleCastUi()
 {
     if (!m_castStatus || !m_castStart || !m_castStop || !m_castCopyInvite
-        || !m_castCopyPublic || !m_castConnect) return;
+        || !m_castCopyPublic || !m_castConnect || !m_castSettings) return;
+
+    QSettings settings;
+    const bool publicEnabled = settings.value(QStringLiteral("Media/WaffleCast/PublicEnabled"), false).toBool();
+    const QString publicHost = settings.value(QStringLiteral("Media/WaffleCast/PublicHost")).toString().trimmed();
+    const int publicPort = settings.value(QStringLiteral("Media/WaffleCast/PublicPort"), 8173).toInt();
+    const int localPort = settings.value(QStringLiteral("Media/WaffleCast/ListenPort"), 8173).toInt();
+
     if (m_cast->active()) {
         const int listeners = m_cast->listenerCount();
         m_castStatus->setText(QStringLiteral("Broadcasting — %1 listener%2 — %3")
@@ -827,13 +1115,22 @@ void MediaWindow::updateWaffleCastUi()
             .arg(listeners == 1 ? QString() : QStringLiteral("s"))
             .arg(m_cast->streamUrl().toString(QUrl::RemovePassword)));
         m_castConnect->setEnabled(false);
+        m_castSettings->setEnabled(false);
         m_castStart->setEnabled(false);
         m_castStop->setEnabled(true);
         m_castStop->setText(QStringLiteral("End Broadcast"));
         m_castCopyPublic->setEnabled(true);
         m_castCopyInvite->setEnabled(true);
-        m_castHint->setText(QStringLiteral(
-            "Use /wafflecast for compatible WaffleHouse listeners. Copy Public Link opens a browser player and also exposes Direct MP3, M3U, and PLS links for VLC/mpv/other players."));
+        if (publicEnabled && !publicHost.isEmpty()) {
+            m_castHint->setText(QStringLiteral(
+                "Internet broadcast is advertised as %1:%2. Router/pfSense should forward TCP %2 to this machine's TCP %3. "
+                "AIM invites and Copy Public Link use the public address; LAN discovery still connects directly on the local network.")
+                .arg(publicHost).arg(publicPort).arg(localPort));
+        } else {
+            m_castHint->setText(QStringLiteral(
+                "LAN broadcast mode. Compatible WaffleHouse clients can discover this automatically. "
+                "Use Broadcast Settings before the next broadcast to advertise a public IP/DNS address for Internet listeners."));
+        }
         return;
     }
     if (m_castListening) {
@@ -841,6 +1138,7 @@ void MediaWindow::updateWaffleCastUi()
             ? QStringLiteral("Listening to WaffleCast")
             : QStringLiteral("Listening to WaffleCast from %1").arg(m_castRemoteHost));
         m_castConnect->setEnabled(false);
+        m_castSettings->setEnabled(true);
         m_castStart->setEnabled(false);
         m_castStop->setEnabled(true);
         m_castStop->setText(QStringLiteral("Leave WaffleCast"));
@@ -851,13 +1149,21 @@ void MediaWindow::updateWaffleCastUi()
     }
     m_castStatus->setText(QStringLiteral("Broadcast off"));
     m_castConnect->setEnabled(true);
+    m_castSettings->setEnabled(true);
     m_castStart->setEnabled(true);
     m_castStop->setEnabled(false);
     m_castStop->setText(QStringLiteral("End Broadcast"));
     m_castCopyPublic->setEnabled(false);
     m_castCopyInvite->setEnabled(false);
-    m_castHint->setText(QStringLiteral(
-        "Start a broadcast, use /wafflecast for native invites, or Connect / Listen with a WaffleCast URL. Non-WaffleHouse listeners can use the public browser/MP3/M3U/PLS links."));
+    if (publicEnabled && !publicHost.isEmpty()) {
+        m_castHint->setText(QStringLiteral(
+            "Internet broadcast configured: %1:%2 → local TCP %3. Start Broadcast to use it. "
+            "Connect / Listen still searches the LAN first and accepts remote public host:port addresses manually.")
+            .arg(publicHost).arg(publicPort).arg(localPort));
+    } else {
+        m_castHint->setText(QStringLiteral(
+            "Start a broadcast or use Connect / Listen. LAN discovery is automatic. Open Broadcast Settings to configure a public IP/DNS name and WAN port for remote Internet listeners."));
+    }
 }
 
 void MediaWindow::showAndRaise()

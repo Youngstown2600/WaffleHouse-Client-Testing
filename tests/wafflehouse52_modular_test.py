@@ -18,7 +18,7 @@ def forbid(path, needle, label):
 for f in ["src/xmppbackend.cpp", "src/sshbackend.cpp", "src/nntpbackend.cpp", "src/networktoolswindow.cpp"]:
     checks.append(((root / f).is_file(), f"new module source exists: {f}"))
 
-require("CMakeLists.txt", 'project(WaffleHouseClient VERSION 5.4.0', "CMake project/version is WaffleHouse-Client 5.4")
+require("CMakeLists.txt", 'project(WaffleHouseClient VERSION 5.5.0', "CMake project/version is WaffleHouse-Client 5.5")
 for flag in ["WAFFLEHOUSE_ENABLE_XMPP", "WAFFLEHOUSE_ENABLE_SSH", "WAFFLEHOUSE_ENABLE_NNTP", "WAFFLEHOUSE_ENABLE_MOSH", "WAFFLEHOUSE_ENABLE_GOPHER", "WAFFLEHOUSE_ENABLE_GEMINI"]:
     require("CMakeLists.txt", flag, f"CMake switch {flag}")
 for proto in ["Xmpp = 5", "Ssh = 6", "Nntp = 7"]:

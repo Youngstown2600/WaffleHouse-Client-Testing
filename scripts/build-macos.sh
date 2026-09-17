@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 [ "$(uname -s)" = Darwin ] || { echo "build-macos.sh must run on macOS." >&2; exit 2; }
 
-RELEASE_VERSION=5.4-alpha2
+RELEASE_VERSION=5.5
 CLEAN=0
 FORCE_PJSIP=0
 AUTO_DEPS=1

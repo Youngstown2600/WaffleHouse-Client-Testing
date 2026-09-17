@@ -5,7 +5,7 @@ win=(root/'build-windows.ps1').read_text()
 term=(root/'scripts/build-termux.sh').read_text()
 main=(root/'src/main.cpp').read_text()
 checks={
- 'version':'APP_VERSION_STRING="5.4-alpha2"' in cm,
+ 'version':'APP_VERSION_STRING="5.5"' in cm,
  'Windows target':'WAFFLEHOUSE_WINDOWS=1' in cm,
  'Termux target':'WAFFLEHOUSE_TERMUX=1' in cm,
  'Windows builder':'build-windows-msys2.sh' in win,

@@ -73,8 +73,8 @@ void ChatWindow::buildMenus()
         QMenu *securityMenu = menuBar()->addMenu(QStringLiteral("&Security"));
         const bool room = m_kind == QStringLiteral("chat");
         QAction *start = securityMenu->addAction(room
-            ? QStringLiteral("Start &Secure Room")
-            : QStringLiteral("Start &Secure Session"));
+            ? QStringLiteral("&Secure Room")
+            : QStringLiteral("&Secure"));
         QAction *status = securityMenu->addAction(room
             ? QStringLiteral("Secure Room &Status")
             : QStringLiteral("Secure Session &Status"));
@@ -88,8 +88,8 @@ void ChatWindow::buildMenus()
         }
         securityMenu->addSeparator();
         QAction *off = securityMenu->addAction(room
-            ? QStringLiteral("&Close Secure Room")
-            : QStringLiteral("&Close Secure Session"));
+            ? QStringLiteral("&Unsecure Room")
+            : QStringLiteral("&Unsecure"));
         if (!room) {
             securityMenu->addSeparator();
             sendFile = securityMenu->addAction(QStringLiteral("Send &File…"));
@@ -197,7 +197,7 @@ void ChatWindow::buildUi()
         securityRow->setSpacing(4);
         m_secureButton = new QPushButton(room ? QStringLiteral("Secure Room") : QStringLiteral("Secure"), central);
         m_secureStatusButton = new QPushButton(QStringLiteral("Status"), central);
-        m_secureCloseButton = new QPushButton(room ? QStringLiteral("Close Secure Room") : QStringLiteral("Close Secure"), central);
+        m_secureCloseButton = new QPushButton(room ? QStringLiteral("Unsecure Room") : QStringLiteral("Unsecure"), central);
         if (!room) m_sendFileButton = new QPushButton(QStringLiteral("Send File…"), central);
         securityRow->addWidget(m_secureButton);
         securityRow->addWidget(m_secureStatusButton);
@@ -592,8 +592,8 @@ void ChatWindow::setSecurityState(bool active,
             .arg(peerFingerprint.isEmpty() ? QStringLiteral("unknown") : peerFingerprint));
     } else {
         m_securityLabel->setText(trusted
-            ? QStringLiteral("🔒 secure · trusted")
-            : QStringLiteral("🔒 secure · unverified"));
+            ? QStringLiteral("🔒 secure")
+            : QStringLiteral("🔒 secure · establishing identity"));
         m_securityLabel->setToolTip(
             QStringLiteral("Peer fingerprint: %1\nLocal fingerprint: %2")
                 .arg(peerFingerprint.isEmpty() ? QStringLiteral("unknown") : peerFingerprint,

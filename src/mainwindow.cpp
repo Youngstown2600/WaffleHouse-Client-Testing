@@ -3625,17 +3625,16 @@ void MainWindow::showHelpDialog()
         "  Telnet traffic, routing metadata, and server-visible endpoints remain outside CPX encryption.\n\n"
         "  1. Open an IM with another compatible WaffleHouse/CPX3-compatible user.\n"
         "  2. Choose Security > Start Secure Session.\n"
-        "  3. Choose Security > Secure Session Status to view both fingerprints.\n"
-        "  4. Compare the peer fingerprint through a separate trusted channel (voice, phone, in person, etc.).\n"
-        "  5. Choose Security > Trust Peer Fingerprint after it matches.\n"
-        "  6. Type normally. Messages are encrypted automatically while the secure session is active.\n\n"
+        "  3. WaffleHouse automatically saves the first authenticated peer identity.\n"
+        "  4. Type normally. Messages are encrypted automatically while the secure session is active.\n"
+        "  5. If that peer identity changes later, WaffleHouse blocks the secure session and warns you.\n\n"
         "SECURE AIM / IRC ROOMS\n"
         "  Open an AIM chat room or IRC channel and choose Security > Start Secure Room (or type /secure).\n"
         "  WaffleHouse creates an XChaCha20-Poly1305 shared room key and delivers it only through established CPX encrypted PM sessions.\n"
         "  Public room traffic contains CPXROOM ciphertext. WaffleHouse-Client peers with the key display [secure-room] plaintext locally; ordinary traffic is marked [plaintext].\n"
         "  The key owner rotates the room key when membership changes and redistributes it to current secure peers.\n\n"
-        "  An unverified secure session is encrypted but not identity-verified.\n"
-        "  If a trusted peer later presents a different key, the client rejects that secure session.\n"
+        "  The first authenticated peer identity is saved automatically (trust on first use).\n"
+        "  If that peer later presents a different key, the client rejects that secure session.\n"
         "  Security > Forget Trusted Fingerprint removes saved trust.\n"
         "  Security > Close Secure Session returns that conversation to plaintext.\n\n"
         "FILE TRANSFER\n"
@@ -5491,14 +5490,14 @@ void MainWindow::showSecureStatus(ChatWindow *window)
     const QString peer = m_secure.peerFingerprint(state->profileId, window->target());
     const QString local = m_secure.localFingerprint(state->profileId);
     const QString trusted = trustedFingerprint(state, window->target());
-    QString trustState = QStringLiteral("unverified");
+    QString trustState = QStringLiteral("not yet pinned");
     if (!peer.isEmpty() && trusted == peer) trustState = QStringLiteral("trusted / verified");
     else if (!trusted.isEmpty() && trusted != peer) trustState = QStringLiteral("TRUST MISMATCH");
 
     const QString body = peer.isEmpty()
         ? QStringLiteral("No secure session is active with %1.\n\nLocal fingerprint:\n%2")
               .arg(window->displayName(), local)
-        : QStringLiteral("Secure session with %1\n\nPeer fingerprint:\n%2\n\nLocal fingerprint:\n%3\n\nTrust: %4\n\nCompare the peer fingerprint using a separate trusted channel before trusting it.")
+        : QStringLiteral("Secure session with %1\n\nPeer fingerprint:\n%2\n\nLocal fingerprint:\n%3\n\nTrust: %4\n\nWaffleHouse automatically saves the first authenticated peer identity. A later identity change is blocked and reported as a trust mismatch.")
               .arg(window->displayName(), peer, local, trustState);
     QMessageBox::information(this, QStringLiteral("Secure Session Status"), body);
 }
@@ -5800,7 +5799,7 @@ void MainWindow::sendFileToTarget(BackendState *state,
     outer->addWidget(help);
     auto updateHelp = [=] {
         help->setText(secure->isChecked()
-            ? QStringLiteral("Secure transfer requires an established CPX secure DM with this peer. Open the PM, start the secure session, compare fingerprints, then send. WaffleHouse encrypts/authenticates the transfer and prefers the encrypted direct path when both peers support it.")
+            ? QStringLiteral("Secure transfer requires an established CPX secure DM with this peer. Open the PM and click Secure; WaffleHouse automatically saves the first authenticated identity. The existing CPX encryption/authentication and encrypted direct path remain unchanged.")
             : QStringLiteral("Unsecured transfer proceeds over ordinary AIM/IRC PM traffic without CPX encryption or authentication. File chunks remain resumable and the completed file is still verified with SHA-256. Transfer control traffic stays out of the visible IM transcript."));
     };
     connect(secure, &QRadioButton::toggled, &modeDialog, updateHelp);
@@ -5819,8 +5818,8 @@ void MainWindow::sendFileToTarget(BackendState *state,
                 this, QStringLiteral("Secure File Transfer — Setup Required"),
                 QStringLiteral("To send securely:\n\n"
                                "1. Open the private message with %1.\n"
-                               "2. Start a secure CPX session (Secure / Start Secure Session).\n"
-                               "3. Compare the displayed fingerprints with the other user and trust the peer.\n"
+                               "2. Click Secure to establish the CPX session.\n"
+                               "3. WaffleHouse automatically saves the first authenticated peer identity.\n"
                                "4. Choose Send File again and select Secure.\n\n"
                                "Nothing will be sent until the secure session is established.")
                     .arg(peerName));
@@ -7039,7 +7038,14 @@ void MainWindow::handleEvent(ChatBackend *backend,
                     if (trusted == result.peerFingerprint) {
                         notice += QStringLiteral(" [trusted]");
                     } else {
-                        notice += QStringLiteral(" [UNVERIFIED — compare fingerprints before trusting]");
+                        // Trust on first use (TOFU): the Secure button is intentionally
+                        // one-click for normal users.  The first successfully authenticated
+                        // CPX identity is pinned automatically.  A later fingerprint change
+                        // is still rejected by the mismatch check above.  This changes only
+                        // trust UX; CPX encryption, authentication and key derivation remain
+                        // untouched.
+                        setTrustedFingerprint(state, target, result.peerFingerprint);
+                        notice += QStringLiteral(" [identity saved]");
                     }
                 }
                 if (!notice.isEmpty()) {

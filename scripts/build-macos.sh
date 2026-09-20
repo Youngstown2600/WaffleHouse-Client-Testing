@@ -289,31 +289,54 @@ ensure_xcode() {
 }
 
 ensure_homebrew() {
-  if command -v brew >/dev/null 2>&1; then
+  # Prefer an already-working package manager before attempting any bootstrap.
+  if command -v brew >/dev/null 2>&1 && brew --version >/dev/null 2>&1; then
     return 0
   fi
-  for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+  for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew /usr/local/Homebrew/bin/brew; do
     if [ -x "$candidate" ]; then
-      eval "$("$candidate" shellenv)"
-      command -v brew >/dev/null 2>&1 && return 0
+      eval "$("$candidate" shellenv 2>/dev/null || true)"
+      if command -v brew >/dev/null 2>&1 && brew --version >/dev/null 2>&1; then return 0; fi
     fi
   done
 
   [ "$AUTO_DEPS" -eq 1 ] || fail "Homebrew is missing and --no-auto-deps was supplied."
-  command -v curl >/dev/null 2>&1 || fail "curl is required to bootstrap Homebrew."
+  command -v curl >/dev/null 2>&1 || fail "curl is required to bootstrap dependencies."
+  command -v git >/dev/null 2>&1 || fail "git is required to bootstrap dependencies. Full Xcode should provide it."
+
+  if [ "$ARCH" = x86_64 ]; then
+    # Homebrew 7 moved Intel macOS to Tier 3 and its normal installer can refuse
+    # new Intel installs. brew itself still runs on Intel during the transition,
+    # so bootstrap the brew repository into the historical Intel prefix instead
+    # of invoking the Apple-Silicon-only installer path.
+    say_step "Bootstrapping Homebrew for Intel macOS (Tier 3 compatibility path)"
+    echo "NOTE: Intel Homebrew is Tier 3; some current formulae may compile from source."
+    if [ ! -d /usr/local/Homebrew/.git ]; then
+      run_admin mkdir -p /usr/local/Homebrew /usr/local/bin /usr/local/Cellar
+      run_admin chown -R "$(id -u):$(id -g)" /usr/local/Homebrew /usr/local/bin /usr/local/Cellar
+      git clone --depth=1 https://github.com/Homebrew/brew /usr/local/Homebrew
+    fi
+    if [ ! -x /usr/local/bin/brew ]; then
+      ln -sf ../Homebrew/bin/brew /usr/local/bin/brew 2>/dev/null || run_admin ln -sf ../Homebrew/bin/brew /usr/local/bin/brew
+    fi
+    export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+    /usr/local/bin/brew --version >/dev/null 2>&1 || fail "Intel Homebrew compatibility bootstrap did not produce a working brew command."
+    eval "$(/usr/local/bin/brew shellenv 2>/dev/null || true)"
+    return 0
+  fi
 
   say_step "Installing Homebrew using the official Homebrew installer"
   export NONINTERACTIVE=1
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+    unset NONINTERACTIVE
+    fail "Homebrew installer failed. The builder stopped before changing project files."
+  fi
   unset NONINTERACTIVE
 
   for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew; do
-    if [ -x "$candidate" ]; then
-      eval "$("$candidate" shellenv)"
-      break
-    fi
+    if [ -x "$candidate" ]; then eval "$("$candidate" shellenv 2>/dev/null || true)"; break; fi
   done
-  command -v brew >/dev/null 2>&1 || fail "Homebrew installation completed but 'brew' is not on PATH."
+  command -v brew >/dev/null 2>&1 && brew --version >/dev/null 2>&1 || fail "Homebrew installation completed but 'brew' is not usable."
 }
 
 need_formula() {
@@ -324,14 +347,24 @@ need_formula() {
     return 1
   fi
   say_step "Installing macOS dependency: $formula"
-  brew install "$formula"
+  if brew install "$formula"; then return 0; fi
+  if [ "$ARCH" = x86_64 ]; then
+    echo "Binary package unavailable/failed on Intel; retrying '$formula' from source..." >&2
+    brew install --build-from-source "$formula"
+    return $?
+  fi
+  return 1
 }
 
 repair_formula() {
   formula=$1
   [ "$AUTO_DEPS" -eq 1 ] || return 1
   say_step "Repairing macOS dependency: $formula"
-  brew reinstall "$formula" || { brew uninstall --ignore-dependencies "$formula" >/dev/null 2>&1 || true; brew install "$formula"; }
+  if brew reinstall "$formula"; then return 0; fi
+  brew uninstall --ignore-dependencies "$formula" >/dev/null 2>&1 || true
+  if brew install "$formula"; then return 0; fi
+  if [ "$ARCH" = x86_64 ]; then brew install --build-from-source "$formula"; return $?; fi
+  return 1
 }
 
 ensure_qt_component_config() {
@@ -388,6 +421,16 @@ done
 # package files, not merely `brew list`, and repair broken/incomplete kegs.
 ensure_qt_component_config qtmultimedia Multimedia
 command -v git >/dev/null 2>&1 || fail "git is required after Xcode setup."
+for tool in cmake pkg-config xcodebuild codesign otool file ditto hdiutil; do
+  command -v "$tool" >/dev/null 2>&1 || fail "Required macOS build tool '$tool' is unavailable after dependency setup."
+done
+
+# Verify the base Qt CMake package too, so a half-installed qtbase keg is fixed
+# before CMake emits a long, misleading component error.
+QTBASE_CHECK=$(brew --prefix qtbase 2>/dev/null || true)
+if [ ! -f "$QTBASE_CHECK/lib/cmake/Qt6/Qt6Config.cmake" ]; then
+  repair_formula qtbase || fail "Qt6 base CMake package is missing and could not be repaired."
+fi
 
 optional_formula mpv "local/radio media playback"
 optional_formula ffmpeg "WaffleCast/album-art and SSH/remote media helper"
@@ -452,12 +495,18 @@ configure_project() {
 if ! configure_project; then
   if [ "$AUTO_DEPS" -eq 1 ]; then
     echo "Initial CMake configure failed; attempting automatic dependency repair..." >&2
-    repair_formula qtmultimedia
+    # Repair the Qt pieces most likely to cause split-keg CMake failures.
+    repair_formula qtbase || true
+    repair_formula qtmultimedia || true
     ensure_qt_component_config qtmultimedia Multimedia
+    QTBASE_PREFIX=$(brew --prefix qtbase)
     QTMULTIMEDIA_PREFIX=$(brew --prefix qtmultimedia)
+    QTTOOLS_PREFIX=$(brew --prefix qttools)
+    QT_CMAKE_PREFIX="$QTBASE_PREFIX;$QTMULTIMEDIA_PREFIX;$QTTOOLS_PREFIX"
+    export PATH="$QTTOOLS_PREFIX/bin:$QTBASE_PREFIX/bin:$PATH"
     rm -f "$BUILD_DIR/CMakeCache.txt"
     rm -rf "$BUILD_DIR/CMakeFiles"
-    configure_project
+    configure_project || fail "CMake configuration still fails after automatic Qt repair. Review the final CMake error above."
   else
     fail "CMake configuration failed and automatic dependency repair is disabled."
   fi
@@ -468,11 +517,37 @@ cmake --build "$BUILD_DIR" -j "$JOBS"
 
 APP="$BUILD_DIR/wafflehouse-client.app"
 [ -d "$APP" ] || fail "macOS app bundle not produced at $APP"
-MACDEPLOYQT="$QTTOOLS_PREFIX/bin/macdeployqt"
-if [ ! -x "$MACDEPLOYQT" ]; then
-  MACDEPLOYQT=$(find "$QTTOOLS_PREFIX" -type f -name macdeployqt -perm -111 -print -quit 2>/dev/null || true)
+find_macdeployqt() {
+  for candidate in \
+    "$QTBASE_PREFIX/bin/macdeployqt" \
+    "$QTTOOLS_PREFIX/bin/macdeployqt" \
+    "$QTMULTIMEDIA_PREFIX/bin/macdeployqt" \
+    "$(command -v macdeployqt 2>/dev/null || true)"; do
+    [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+  done
+  for root in "$QTBASE_PREFIX" "$QTTOOLS_PREFIX" "$QTMULTIMEDIA_PREFIX"; do
+    candidate=$(find "$root" -type f -name macdeployqt -perm -111 -print -quit 2>/dev/null || true)
+    [ -n "$candidate" ] && [ -x "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
+  done
+  return 1
+}
+
+MACDEPLOYQT=$(find_macdeployqt 2>/dev/null || true)
+if [ -z "$MACDEPLOYQT" ] || [ ! -x "$MACDEPLOYQT" ]; then
+  if [ "$AUTO_DEPS" -eq 1 ]; then
+    say_step "Repairing Qt deployment tooling (macdeployqt)"
+    # macdeployqt normally ships with qtbase; repair qtbase first, then qttools
+    # for Homebrew layouts that split additional Qt tooling.
+    repair_formula qtbase
+    repair_formula qttools || true
+    QTBASE_PREFIX=$(brew --prefix qtbase)
+    QTTOOLS_PREFIX=$(brew --prefix qttools)
+    export PATH="$QTBASE_PREFIX/bin:$QTTOOLS_PREFIX/bin:$PATH"
+    MACDEPLOYQT=$(find_macdeployqt 2>/dev/null || true)
+  fi
 fi
-[ -n "$MACDEPLOYQT" ] && [ -x "$MACDEPLOYQT" ] || fail "macdeployqt not found under $QTTOOLS_PREFIX"
+[ -n "$MACDEPLOYQT" ] && [ -x "$MACDEPLOYQT" ] || fail "macdeployqt is unavailable after Qt deployment-tool repair. Checked qtbase, qttools, qtmultimedia, and PATH."
+echo "macdeployqt:    $MACDEPLOYQT"
 
 # Keep notification sounds self-contained inside the .app.
 mkdir -p "$APP/Contents/Resources/sounds"

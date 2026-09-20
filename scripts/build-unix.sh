@@ -59,7 +59,7 @@ usage() {
   cat <<EOF2
 Usage: ./build.sh [options]
 
-Build WaffleHouse-Client 5.5 for Linux or FreeBSD (GUI + CLI).
+Build WaffleHouse-Client 5.6 for Linux or FreeBSD (GUI + CLI).
 The Media Center adds local media/video, SHOUTcast/Icecast/HTTP/HLS streams, internet radio, and playlists.
 
 The builder performs a full dependency preflight. Missing dependencies are
@@ -187,7 +187,7 @@ LEGACY_CLI_DESKTOP="$INSTALL_DESKTOPDIR/wafflehouse-cli.desktop"
 show_header() {
   cat <<EOF2
 ============================================================
-                    WAFFLEHOUSE-CLIENT 5.5
+                    WAFFLEHOUSE-CLIENT 5.6
 ============================================================
 Host OS:        $HOST_OS
 Build jobs:     $JOBS
@@ -1492,7 +1492,7 @@ else
 fi
 
 echo
-echo "==> Configuring WaffleHouse-Client 5.5"
+echo "==> Configuring WaffleHouse-Client 5.6"
 # Use the compiler and GNU Make that passed the preflight. On FreeBSD this
 # intentionally means Clang/libc++ for ABI compatibility with packaged Qt6;
 # GCC/G++ are still checked/installed as explicit project prerequisites.
@@ -1505,7 +1505,7 @@ run_cmd env CC="$BUILD_CC" CXX="$BUILD_CXX" cmake -S . -B build \
   -DCMAKE_MAKE_PROGRAM="$BUILD_MAKE" ${WAFFLEHOUSE_FEATURE_CMAKE_ARGS:-}
 
 echo
-echo "==> Building WaffleHouse-Client 5.5"
+echo "==> Building WaffleHouse-Client 5.6"
 run_cmd cmake --build build --parallel "$JOBS"
 
 # A normal test build never writes the application into PREFIX/bin unless the
@@ -1514,7 +1514,7 @@ ask_install
 
 if [ "$INSTALL_MODE" = yes ]; then
   echo
-  echo "==> Installing WaffleHouse-Client 5.5"
+  echo "==> Installing WaffleHouse-Client 5.6"
   prepare_privileges
   if [ -e "$INSTALL_BIN" ] || [ -L "$INSTALL_BIN" ]; then
     echo "Existing WaffleHouse-Client detected; performing in-place upgrade after successful build."
@@ -1544,4 +1544,4 @@ echo "  Interactive terminal launch      -> CLI"
 echo "  wafflehouse-client --gui         -> force GUI"
 echo "  wafflehouse-client --cli         -> force CLI"
 
-if [ "$DRY_RUN" -eq 1 ]; then echo "Dry run complete."; else echo "WaffleHouse-Client 5.5 build complete."; fi
+if [ "$DRY_RUN" -eq 1 ]; then echo "Dry run complete."; else echo "WaffleHouse-Client 5.6 build complete."; fi

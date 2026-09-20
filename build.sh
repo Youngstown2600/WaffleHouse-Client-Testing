@@ -13,7 +13,7 @@ BOOTSTRAP_ONLY=0
 
 usage() {
   cat <<'USAGE'
-WaffleHouse-Client 5.5 — Linux/Unix/macOS builder
+WaffleHouse-Client 5.6 — Linux/Unix/macOS builder
 
 Usage: ./build.sh [--os linux|freebsd|macos] [--protocols LIST] [--uninstall] [platform build options]
 
@@ -118,7 +118,7 @@ if [ -z "$SELECTED_OS" ]; then
   fi
   cat <<'PROMPT'
 ============================================================
-             WAFFLEHOUSE-CLIENT 5.5
+             WAFFLEHOUSE-CLIENT 5.6
 ============================================================
 What operating system are you installing on?
 

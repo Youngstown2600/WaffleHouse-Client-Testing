@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(WaffleHouseClient VERSION 5.5.0 LANGUAGES CXX)
+project(WaffleHouseClient VERSION 5.6.0 LANGUAGES CXX)
 
 set(APP_DISPLAY_NAME "WaffleHouse-Client" CACHE STRING "Application display name")
 set(APP_ID "WaffleHouseClient" CACHE STRING "Application settings/config identifier")
@@ -48,7 +48,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
 endif()
 pkg_check_modules(PJPROJECT REQUIRED libpjproject)
 if(NOT PJPROJECT_VERSION VERSION_EQUAL "2.17")
-    message(FATAL_ERROR "WaffleHouse-Client 5.5 softphone requires PJSIP 2.17; pkg-config reported ${PJPROJECT_VERSION}")
+    message(FATAL_ERROR "WaffleHouse-Client 5.6 softphone requires PJSIP 2.17; pkg-config reported ${PJPROJECT_VERSION}")
 endif()
 if(NOT PJPROJECT_STATIC_LDFLAGS)
     message(FATAL_ERROR "pkg-config did not return static PJSIP flags. Check: pkg-config --cflags --libs --static libpjproject")
@@ -200,7 +200,7 @@ target_compile_definitions(${APP_EXECUTABLE} PRIVATE
     APP_DISPLAY_NAME="${APP_DISPLAY_NAME}"
     APP_ID="${APP_ID}"
     APP_EXECUTABLE="${APP_EXECUTABLE}"
-    APP_VERSION_STRING="5.5"
+    APP_VERSION_STRING="5.6"
     WAFFLEHOUSE_SOURCE_SOUND_DIR="${CMAKE_CURRENT_SOURCE_DIR}/sounds"
     WAFFLEHOUSE_OSCAR_VOICE=1
     WAFFLEHOUSE_FEATURE_OSCAR=$<BOOL:${WAFFLEHOUSE_ENABLE_OSCAR}>
@@ -254,8 +254,8 @@ if(APPLE)
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "WaffleHouse-Client"
         MACOSX_BUNDLE_GUI_IDENTIFIER "local.wafflehouse-client"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "5.5"
-        MACOSX_BUNDLE_BUNDLE_VERSION "5.5.0"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "5.6"
+        MACOSX_BUNDLE_BUNDLE_VERSION "5.6.0"
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
     target_compile_definitions(${APP_EXECUTABLE} PRIVATE WAFFLEHOUSE_FREEBSD=1)
@@ -270,7 +270,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_compile_definitions(${APP_EXECUTABLE} PRIVATE WAFFLEHOUSE_TERMUX=1)
     endif()
 else()
-    message(FATAL_ERROR "WaffleHouse-Client 5.5 supports Linux/Unix, FreeBSD, macOS, Windows, and Termux/Android")
+    message(FATAL_ERROR "WaffleHouse-Client 5.6 supports Linux/Unix, FreeBSD, macOS, Windows, and Termux/Android")
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")

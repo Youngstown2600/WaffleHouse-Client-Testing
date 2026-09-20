@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 [ "$(uname -s)" = Darwin ] || { echo "build-macos.sh must run on macOS." >&2; exit 2; }
 
-RELEASE_VERSION=5.5
+RELEASE_VERSION=5.6
 CLEAN=0
 FORCE_PJSIP=0
 AUTO_DEPS=1
@@ -327,6 +327,27 @@ need_formula() {
   brew install "$formula"
 }
 
+repair_formula() {
+  formula=$1
+  [ "$AUTO_DEPS" -eq 1 ] || return 1
+  say_step "Repairing macOS dependency: $formula"
+  brew reinstall "$formula" || { brew uninstall --ignore-dependencies "$formula" >/dev/null 2>&1 || true; brew install "$formula"; }
+}
+
+ensure_qt_component_config() {
+  formula=$1
+  component=$2
+  prefix=$(brew --prefix "$formula" 2>/dev/null || true)
+  config="$prefix/lib/cmake/Qt6${component}/Qt6${component}Config.cmake"
+  if [ ! -f "$config" ]; then
+    echo "Qt6${component} CMake package is missing from $formula ($config)." >&2
+    repair_formula "$formula" || fail "Qt6${component} is required. Re-run without --no-auto-deps or install/repair Homebrew formula '$formula'."
+    prefix=$(brew --prefix "$formula" 2>/dev/null || true)
+    config="$prefix/lib/cmake/Qt6${component}/Qt6${component}Config.cmake"
+  fi
+  [ -f "$config" ] || fail "Homebrew reports '$formula' installed, but Qt6${component}Config.cmake is still missing at $config."
+}
+
 optional_formula() {
   formula=$1
   purpose=$2
@@ -363,6 +384,9 @@ echo "Homebrew:      $BREW_PREFIX"
 for formula in cmake pkg-config qtbase qtmultimedia qttools libsodium ncurses portaudio opus; do
   need_formula "$formula"
 done
+# Homebrew installs Qt modules in separate kegs.  Verify the actual CMake
+# package files, not merely `brew list`, and repair broken/incomplete kegs.
+ensure_qt_component_config qtmultimedia Multimedia
 command -v git >/dev/null 2>&1 || fail "git is required after Xcode setup."
 
 optional_formula mpv "local/radio media playback"
@@ -412,9 +436,32 @@ printf '%s\n' "============================================================" \
 say_step "Configuring WaffleHouse-Client $RELEASE_VERSION"
 # Feature flags are fixed -DNAME=ON/OFF tokens supplied by the top-level builder.
 # shellcheck disable=SC2086
-cmake -S "$ROOT_DIR" -B "$BUILD_DIR" \
-  -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-  -DCMAKE_PREFIX_PATH="$QT_CMAKE_PREFIX" ${WAFFLEHOUSE_FEATURE_CMAKE_ARGS:-}
+configure_project() {
+  cmake -S "$ROOT_DIR" -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_PREFIX_PATH="$QT_CMAKE_PREFIX" \
+    -DQt6_DIR="$QTBASE_PREFIX/lib/cmake/Qt6" \
+    -DQt6Multimedia_DIR="$QTMULTIMEDIA_PREFIX/lib/cmake/Qt6Multimedia" \
+    ${WAFFLEHOUSE_FEATURE_CMAKE_ARGS:-}
+}
+
+# A split Homebrew Qt install can be healthy while Qt6Config.cmake looks only
+# under qtbase for add-on modules. Pass the module directory explicitly. If a
+# previous/incomplete keg still causes configuration to fail, repair it and
+# retry once automatically with a clean CMake cache.
+if ! configure_project; then
+  if [ "$AUTO_DEPS" -eq 1 ]; then
+    echo "Initial CMake configure failed; attempting automatic dependency repair..." >&2
+    repair_formula qtmultimedia
+    ensure_qt_component_config qtmultimedia Multimedia
+    QTMULTIMEDIA_PREFIX=$(brew --prefix qtmultimedia)
+    rm -f "$BUILD_DIR/CMakeCache.txt"
+    rm -rf "$BUILD_DIR/CMakeFiles"
+    configure_project
+  else
+    fail "CMake configuration failed and automatic dependency repair is disabled."
+  fi
+fi
 
 say_step "Building WaffleHouse-Client $RELEASE_VERSION"
 cmake --build "$BUILD_DIR" -j "$JOBS"

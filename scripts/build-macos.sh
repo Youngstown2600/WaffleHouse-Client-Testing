@@ -288,6 +288,31 @@ ensure_xcode() {
   configure_xcode "$downloaded_app"
 }
 
+ensure_command_line_tools() {
+  # Homebrew source builds on Ventura/Intel require the standalone CLT receipt
+  # even when full Xcode is installed and selected.
+  if /usr/sbin/pkgutil --pkg-info=com.apple.pkg.CLTools_Executables >/dev/null 2>&1 && \
+     /usr/bin/xcrun --find clang >/dev/null 2>&1 && \
+     /usr/bin/xcrun --show-sdk-path >/dev/null 2>&1; then
+    echo "Apple Command Line Tools: installed"
+    return 0
+  fi
+  echo "Apple Command Line Tools are missing/incomplete; Homebrew source builds require them." >&2
+  if [ "$AUTO_DEPS" -eq 0 ]; then
+    fail "Install Apple's Command Line Tools with 'xcode-select --install', then rerun the builder."
+  fi
+  if [ -t 0 ]; then
+    echo "Launching Apple's Command Line Tools installer..."
+    /usr/bin/xcode-select --install >/dev/null 2>&1 || true
+    printf '\nComplete the Apple Command Line Tools installation, then press Enter to re-check: '
+    IFS= read -r _clt_continue
+  fi
+  /usr/sbin/pkgutil --pkg-info=com.apple.pkg.CLTools_Executables >/dev/null 2>&1 || \
+    fail "Apple Command Line Tools are still not installed. Complete 'xcode-select --install' and rerun ./build.sh."
+  /usr/bin/xcrun --find clang >/dev/null 2>&1 || fail "Command Line Tools installed, but clang is unavailable."
+  /usr/bin/xcrun --show-sdk-path >/dev/null 2>&1 || fail "Command Line Tools installed, but the macOS SDK cannot be resolved."
+}
+
 repair_intel_homebrew_permissions() {
   [ "$ARCH" = x86_64 ] || return 0
   [ "$AUTO_DEPS" -eq 1 ] || return 0
@@ -454,6 +479,7 @@ say_step "macOS development environment preflight"
 echo "macOS:         $MACOS_VERSION"
 echo "Architecture:  $ARCH"
 ensure_xcode
+ensure_command_line_tools
 ensure_homebrew
 BREW_PREFIX=$(brew --prefix)
 echo "Homebrew:      $BREW_PREFIX"
@@ -654,6 +680,29 @@ for formula in $DEP_FORMULAS; do
   seen_libpaths="$seen_libpaths $prefix/lib"
   set -- "$@" "-libpath=$prefix/lib"
 done
+
+# Do not depend on formula names to discover split Qt modules. Scan Homebrew's
+# actual opt/Cellar trees for installed Qt frameworks and add every unique
+# framework parent directory to macdeployqt. This covers QtSvg,
+# QtVirtualKeyboard, and future Qt modules without another hard-coded patch.
+QT_FRAMEWORK_DIRS_FILE="$BUILD_DIR/qt-framework-libpaths.txt"
+: > "$QT_FRAMEWORK_DIRS_FILE"
+for qt_root in "$BREW_PREFIX/opt" "$BREW_PREFIX/Cellar"; do
+  [ -d "$qt_root" ] || continue
+  find "$qt_root" -type d -name 'Qt*.framework' -print 2>/dev/null | while IFS= read -r fw; do
+    dirname "$fw"
+  done >> "$QT_FRAMEWORK_DIRS_FILE"
+done
+sort -u "$QT_FRAMEWORK_DIRS_FILE" -o "$QT_FRAMEWORK_DIRS_FILE"
+while IFS= read -r libpath; do
+  [ -d "$libpath" ] || continue
+  case " $seen_libpaths " in *" $libpath "*) continue ;; esac
+  seen_libpaths="$seen_libpaths $libpath"
+  set -- "$@" "-libpath=$libpath"
+done < "$QT_FRAMEWORK_DIRS_FILE"
+
+echo "Qt deployment library paths:"
+for libpath in $seen_libpaths; do echo "  $libpath"; done
 
 DEPLOY_LOG="$BUILD_DIR/macdeployqt.log"
 say_step "Deploying Qt frameworks, plugins, and runtime libraries"

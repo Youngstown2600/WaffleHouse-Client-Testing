@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 [ "$(uname -s)" = Darwin ] || { echo "build-macos.sh must run on macOS." >&2; exit 2; }
 
-RELEASE_VERSION=5.6
+RELEASE_VERSION=5.6.1
 CLEAN=0
 FORCE_PJSIP=0
 AUTO_DEPS=1
@@ -288,15 +288,61 @@ ensure_xcode() {
   configure_xcode "$downloaded_app"
 }
 
+repair_intel_homebrew_permissions() {
+  [ "$ARCH" = x86_64 ] || return 0
+  [ "$AUTO_DEPS" -eq 1 ] || return 0
+
+  # A manual Intel bootstrap must create the same writable state that the
+  # historical Homebrew installer established.  Never chown all of /usr/local:
+  # restrict repairs to Homebrew-owned paths only.
+  say_step "Validating Intel Homebrew permissions"
+  uidgid="$(id -u):$(id -g)"
+  for d in \
+    /usr/local/Homebrew \
+    /usr/local/Cellar \
+    /usr/local/Caskroom \
+    /usr/local/Frameworks \
+    /usr/local/var/homebrew \
+    /usr/local/var/homebrew/locks \
+    /usr/local/etc \
+    /usr/local/include \
+    /usr/local/lib \
+    /usr/local/opt \
+    /usr/local/sbin \
+    /usr/local/share; do
+    if [ ! -d "$d" ]; then
+      mkdir -p "$d" 2>/dev/null || run_admin mkdir -p "$d"
+    fi
+    if [ ! -w "$d" ]; then
+      echo "Repairing Homebrew-owned path: $d"
+      run_admin chown -R "$uidgid" "$d"
+    fi
+  done
+
+  # Brew also needs the parent var directory to traverse/create state.  Do not
+  # recursively change it; only ensure it exists and the Homebrew subtree works.
+  [ -d /usr/local/var ] || run_admin mkdir -p /usr/local/var
+  [ -d /usr/local/var/homebrew/locks ] || run_admin mkdir -p /usr/local/var/homebrew/locks
+  run_admin chown "$uidgid" /usr/local/var/homebrew /usr/local/var/homebrew/locks 2>/dev/null || true
+
+  testfile=/usr/local/var/homebrew/.wafflehouse-write-test
+  if ! ( : > "$testfile" ) 2>/dev/null; then
+    run_admin chown -R "$uidgid" /usr/local/var/homebrew
+    ( : > "$testfile" ) 2>/dev/null || fail "Intel Homebrew state directory is still not writable: /usr/local/var/homebrew"
+  fi
+  rm -f "$testfile"
+}
+
 ensure_homebrew() {
   # Prefer an already-working package manager before attempting any bootstrap.
   if command -v brew >/dev/null 2>&1 && brew --version >/dev/null 2>&1; then
+    repair_intel_homebrew_permissions
     return 0
   fi
   for candidate in /opt/homebrew/bin/brew /usr/local/bin/brew /usr/local/Homebrew/bin/brew; do
     if [ -x "$candidate" ]; then
       eval "$("$candidate" shellenv 2>/dev/null || true)"
-      if command -v brew >/dev/null 2>&1 && brew --version >/dev/null 2>&1; then return 0; fi
+      if command -v brew >/dev/null 2>&1 && brew --version >/dev/null 2>&1; then repair_intel_homebrew_permissions; return 0; fi
     fi
   done
 
@@ -312,14 +358,15 @@ ensure_homebrew() {
     say_step "Bootstrapping Homebrew for Intel macOS (Tier 3 compatibility path)"
     echo "NOTE: Intel Homebrew is Tier 3; some current formulae may compile from source."
     if [ ! -d /usr/local/Homebrew/.git ]; then
-      run_admin mkdir -p /usr/local/Homebrew /usr/local/bin /usr/local/Cellar
-      run_admin chown -R "$(id -u):$(id -g)" /usr/local/Homebrew /usr/local/bin /usr/local/Cellar
+      run_admin mkdir -p /usr/local/Homebrew /usr/local/bin /usr/local/Cellar /usr/local/var/homebrew/locks
+      run_admin chown -R "$(id -u):$(id -g)" /usr/local/Homebrew /usr/local/Cellar /usr/local/var/homebrew
       git clone --depth=1 https://github.com/Homebrew/brew /usr/local/Homebrew
     fi
     if [ ! -x /usr/local/bin/brew ]; then
       ln -sf ../Homebrew/bin/brew /usr/local/bin/brew 2>/dev/null || run_admin ln -sf ../Homebrew/bin/brew /usr/local/bin/brew
     fi
     export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+    repair_intel_homebrew_permissions
     /usr/local/bin/brew --version >/dev/null 2>&1 || fail "Intel Homebrew compatibility bootstrap did not produce a working brew command."
     eval "$(/usr/local/bin/brew shellenv 2>/dev/null || true)"
     return 0
@@ -347,6 +394,7 @@ need_formula() {
     return 1
   fi
   say_step "Installing macOS dependency: $formula"
+  repair_intel_homebrew_permissions
   if brew install "$formula"; then return 0; fi
   if [ "$ARCH" = x86_64 ]; then
     echo "Binary package unavailable/failed on Intel; retrying '$formula' from source..." >&2
@@ -414,7 +462,7 @@ echo "Homebrew:      $BREW_PREFIX"
 # Qt Core/Gui/Widgets/Network/Multimedia plus deployment tooling. Keeping the
 # dependency set narrow reduces source builds and avoids dragging unrelated
 # Qt modules into the application bundle on older macOS releases.
-for formula in cmake pkg-config qtbase qtmultimedia qttools libsodium ncurses portaudio opus; do
+for formula in cmake pkg-config qtbase qtmultimedia qttools qtsvg qtdeclarative qtvirtualkeyboard libsodium ncurses portaudio opus; do
   need_formula "$formula"
 done
 # Homebrew installs Qt modules in separate kegs.  Verify the actual CMake
@@ -576,8 +624,19 @@ cp -f "$COCOA_PLUGIN" "$APP/Contents/PlugIns/platforms/libqcocoa.dylib"
 # This fixes Ventura failures where split Qt plugins depend on Brotli, WebP,
 # HarfBuzz, Graphite2, etc. and macdeployqt otherwise sees only an @rpath name.
 set -- "$APP" -verbose=2 -always-overwrite -no-codesign
-DEP_FORMULAS="qtbase qtmultimedia qttools libsodium ncurses portaudio opus"
-for root_formula in qtbase qtmultimedia qttools; do
+
+# Homebrew splits Qt 6 into separate formulae. Some Qt plugins/frameworks pulled
+# in by Multimedia/Gui can reference QtSvg or QtVirtualKeyboard at deployment
+# time even though the application itself compiled without those modules. Ensure
+# those runtime framework providers exist before macdeployqt walks the plugin tree.
+for qt_runtime_formula in qtsvg qtdeclarative qtvirtualkeyboard; do
+  if ! brew list --versions "$qt_runtime_formula" >/dev/null 2>&1; then
+    say_step "Installing Qt deployment runtime: $qt_runtime_formula"
+    install_formula "$qt_runtime_formula" || fail "Could not install required Qt deployment runtime: $qt_runtime_formula"
+  fi
+done
+DEP_FORMULAS="qtbase qtmultimedia qttools qtsvg qtdeclarative qtvirtualkeyboard libsodium ncurses portaudio opus"
+for root_formula in qtbase qtmultimedia qttools qtsvg qtdeclarative qtvirtualkeyboard; do
   deps=$(brew deps --installed --formula "$root_formula" 2>/dev/null || true)
   DEP_FORMULAS="$DEP_FORMULAS $deps"
 done

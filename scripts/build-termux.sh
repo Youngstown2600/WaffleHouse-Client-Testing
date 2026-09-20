@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-echo "WaffleHouse-Client 5.6 - Termux/Android GUI + CLI"
+echo "WaffleHouse-Client 5.6.1 - Termux/Android GUI + CLI"
 if [[ -z "${TERMUX_VERSION:-}" && "${PREFIX:-}" != *com.termux* ]]; then
   echo "This builder must be run inside Termux." >&2; exit 2
 fi

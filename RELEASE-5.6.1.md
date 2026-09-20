@@ -1,8 +1,8 @@
-# WaffleHouse-Client 5.6
+# WaffleHouse-Client 5.6.1
 
-WaffleHouse-Client 5.6 promotes the simplified Secure/Unsecure UX update from the 5.5 development line.
+WaffleHouse-Client 5.6.1 promotes the simplified Secure/Unsecure UX update from the 5.5 development line.
 
-## 5.6 changes
+## 5.6.1 changes
 - One-click Secure behavior for instant messaging.
 - First successfully authenticated peer identity is pinned automatically.
 - Unexpected identity/fingerprint changes remain blocked and surfaced as a trust warning.

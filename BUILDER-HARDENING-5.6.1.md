@@ -1,4 +1,4 @@
-# WaffleHouse-Client 5.6 Builder Hardening
+# WaffleHouse-Client 5.6.1 Builder Hardening
 
 This release hardens the macOS builder around failures observed on real Ventura systems and adds defensive preflight checks for future installs.
 
@@ -28,7 +28,7 @@ This release hardens the macOS builder around failures observed on real Ventura 
 - Verifies the Qt6 base CMake package before configuration.
 - Recalculates split-Qt prefixes after repair instead of retaining stale paths.
 - Keeps the existing standalone bundle dependency audit, Cocoa platform-plugin verification, ad-hoc signing check, executable smoke test, and DMG existence check.
-- Corrected stale 5.5 builder labels in the top-level, Linux/FreeBSD, Termux, and Windows/MSYS2 scripts to 5.6.
+- Corrected stale 5.5 builder labels in the top-level, Linux/FreeBSD, Termux, and Windows/MSYS2 scripts to 5.6.1.
 
 ## Behavior
 

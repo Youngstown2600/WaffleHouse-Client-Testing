@@ -1,4 +1,4 @@
-# WaffleHouse-Client 5.6 macOS builder auto-repair
+# WaffleHouse-Client 5.6.1 macOS builder auto-repair
 
 The macOS builder now verifies the actual Qt Multimedia CMake package after Homebrew dependency installation. If `qtmultimedia` is registered as installed but `Qt6MultimediaConfig.cmake` is missing, the builder automatically repairs/reinstalls the formula (unless `--no-auto-deps` was requested).
 

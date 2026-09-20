@@ -8,4 +8,4 @@ grep -q 'ensure_qt_component_config qtmultimedia Multimedia' "$S"
 grep -q '\$QTBASE_PREFIX/bin/macdeployqt' "$S"
 grep -q 'Repairing Qt deployment tooling' "$S"
 grep -q 'Required macOS build tool' "$S"
-echo 'macOS 5.6 builder hardening regression: PASS'
+echo 'macOS 5.6.1 builder hardening regression: PASS'

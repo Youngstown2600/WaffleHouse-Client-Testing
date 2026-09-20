@@ -1,4 +1,4 @@
-# WaffleHouse-Client 5.6 — Validation
+# WaffleHouse-Client 5.6.1 — Validation
 
 ## Automated source/regression tests
 
@@ -22,7 +22,7 @@ The suite includes the inherited Media Center Stop→Play and Pause→Play regre
 The packaging container does not contain the Qt 6 development package (`Qt6Config.cmake`), so a complete native Qt build cannot be performed here. CMake reaches `find_package(Qt6 ...)` and stops because Qt 6 headers/configuration are unavailable. The first Linux Mint/FreeBSD/macOS/Windows build remains the native compile/runtime validation.
 
 
-## WaffleHouse-Client 5.6 remote WaffleCast update
+## WaffleHouse-Client 5.6.1 remote WaffleCast update
 
 - 32/32 packaged source/regression test files pass after adding saved Internet broadcast settings, independent local/public ports, LAN hairpin avoidance, and remote bare-host resolution.
 - Added `tests/r55_wafflecast_remote_broadcast_test.py` with 11 targeted checks.
